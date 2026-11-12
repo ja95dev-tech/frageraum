@@ -484,7 +484,8 @@
     { icon: "🐳", name: "Walgesang-Studio", makes: "Hits und Konzerte", cost: 1.6e11, cps: 3.3e8 },
     { icon: "🔱", name: "Atlantis-Tempel", makes: "Schätze", cost: 1.2e12, cps: 2e9 },
     { icon: "🌀", name: "Strudel-Reaktor", makes: "Strudelkraft", cost: 9e12, cps: 1.2e10 },
-    { icon: "👑", name: "Quallen-Thronsaal", makes: "Quallengold", cost: 7e13, cps: 7.5e10 }
+    { icon: "👑", name: "Quallen-Thronsaal", makes: "Quallengold", cost: 7e13, cps: 7.5e10 },
+    { icon: "🏭", name: "Chinesische Kinderarbeit", makes: "Temu-ware", cost: 5e14, cps:9e11}
   ];
 
   // Jede Stufe verdoppelt den Ertrag pro Klick
