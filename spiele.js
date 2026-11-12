@@ -485,7 +485,7 @@
     { icon: "🔱", name: "Atlantis-Tempel", makes: "Schätze", cost: 1.2e12, cps: 2e9 },
     { icon: "🌀", name: "Strudel-Reaktor", makes: "Strudelkraft", cost: 9e12, cps: 1.2e10 },
     { icon: "👑", name: "Quallen-Thronsaal", makes: "Quallengold", cost: 7e13, cps: 7.5e10 },
-    { icon: "🏭", name: "Chinesische Kinderarbeit", makes: "Temu-ware", cost: 5e14, cps:9e11}
+    { icon: "🏭", name: "Chinesische-Kinderarbeit", makes: "Temu-ware", cost: 5e14, cps:9e11}
   ];
 
   // Jede Stufe verdoppelt den Ertrag pro Klick
@@ -525,7 +525,7 @@
   ];
 
   var STAGES = [[0, "Korallenlager"], [10, "Unterwasserdorf"], [30, "Riffstadt"], [70, "Tiefsee-Stadt"],
-    [150, "Meeresmetropole"], [300, "Atlantis"], [600, "Quallen-Imperium"]];
+    [150, "Meeresmetropole"], [300, "Atlantis"], [600, "Quallen-Imperium"][700, "Chinesische-Kinderarbeit"]];
 
   var UNITS = [[1e24, "Quad."], [1e21, "Trd."], [1e18, "Tri."], [1e15, "Brd."], [1e12, "Bio."], [1e9, "Mrd."], [1e6, "Mio."], [1e3, "Tsd."]];
 
