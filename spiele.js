@@ -525,7 +525,7 @@
   ];
 
   var STAGES = [[0, "Korallenlager"], [10, "Unterwasserdorf"], [30, "Riffstadt"], [70, "Tiefsee-Stadt"],
-    [150, "Meeresmetropole"], [300, "Atlantis"], [600, "Quallen-Imperium"][700, "Chinesische-Kinderarbeit"]];
+    [150, "Meeresmetropole"], [300, "Atlantis"], [600, "Quallen-Imperium"],[700, "Chinesische-Kinderarbeit"]];
 
   var UNITS = [[1e24, "Quad."], [1e21, "Trd."], [1e18, "Tri."], [1e15, "Brd."], [1e12, "Bio."], [1e9, "Mrd."], [1e6, "Mio."], [1e3, "Tsd."]];
 
