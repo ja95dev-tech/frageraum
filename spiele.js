@@ -1058,22 +1058,185 @@
   }
 
   // ---------- Oberfläche ----------
-  var CSS =
-    ".qi-ocean{position:relative;max-width:34rem;min-height:6.5rem;padding:0.75rem 1rem;margin:0 0 1rem;border-radius:8px;border:1px solid #2a8fc2;background:linear-gradient(#cdeffa,#6cc3e8 55%,#3b97c8);color:#0b2a3d;font-size:1.35rem;line-height:1.5;overflow:hidden}" +
-    ".qi-ocean .qi-empty{font-size:0.95rem}" +
-    ".qi-row{overflow-wrap:anywhere}" +
-    ".qi-gold{position:absolute;padding:0.45rem 0.9rem;font-size:0.95rem;font-weight:700;background:linear-gradient(135deg,#ffe27a,#ffb300);color:#4a3200;border:2px solid #fff;border-radius:999px;box-shadow:0 0 16px #ffd54f;cursor:pointer}" +
-    "@media (prefers-reduced-motion: no-preference){.qi-gold{animation:qi-pulse 1s ease-in-out infinite alternate}@keyframes qi-pulse{from{transform:scale(1)}to{transform:scale(1.1)}}}" +
-    ".qi-qty{margin:0 0 0.75rem}" +
-    ".qi-boost{font-weight:700;color:var(--accent)}" +
-    ".qi-done{font-weight:700}" +
-    ".qi-stats{padding-left:1.2rem;margin:0.5rem 0 1rem}";
+  // Aufbau: dunkles Meeres-Fenster (Zähler, Perle zum Klicken, Riff) und darunter helle Arbeitsbereiche in den Farben der Seite.
+  var CSS = [
+    ".qi{--qi-glow:#55e6c8;--qi-violet:#9b8cff;--qi-pearl:#f3eee4;--qi-gold:#ffc857;max-width:40rem}",
+
+    /* Meeres-Fenster */
+    ".qi-scene{position:relative;overflow:hidden;border-radius:1.4rem 1.4rem 0.8rem 0.8rem;padding:1.1rem 1rem 1rem;color:var(--qi-pearl);" +
+      "background:radial-gradient(120% 70% at 50% -10%,rgba(85,230,200,.30),transparent 60%),linear-gradient(180deg,#0e4560 0%,#0a2c3f 45%,#061922 100%);" +
+      "box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}",
+    ".qi-in{position:relative;z-index:1}",
+    ".qi-top{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem}",
+    ".qi-stage{font-family:var(--serif);font-style:italic;font-size:1.05rem;line-height:1.25}",
+    ".qi-stagebar{height:3px;width:7.5rem;max-width:100%;border-radius:2px;background:rgba(255,255,255,.16);margin-top:.4rem;overflow:hidden}",
+    ".qi-stagebar i{display:block;height:100%;width:0;background:var(--qi-glow);transition:width .4s}",
+    ".qi-chips{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}",
+    ".qi-chip{font-size:.8rem;font-weight:600;line-height:1.2;padding:.25rem .65rem;border-radius:999px;background:rgba(155,140,255,.24);border:1px solid rgba(155,140,255,.6)}",
+    ".qi-count{font-family:var(--serif);font-weight:600;font-size:clamp(2.6rem,12vw,4rem);line-height:1.05;letter-spacing:-.02em;text-align:center;margin:.7rem 0 0;font-variant-numeric:tabular-nums;text-shadow:0 0 26px rgba(85,230,200,.4)}",
+    ".qi-rate{text-align:center;margin:.2rem 0 0;font-size:.95rem;opacity:.85}",
+    ".qi-bonus{text-align:center;margin:0;font-size:.82rem;opacity:.6}",
+    ".qi-orbwrap{position:relative;display:flex;justify-content:center;margin:1.1rem 0 .9rem}",
+    ".qi-orb{width:8.6rem;height:8.6rem;border-radius:50%;border:0;padding:0;cursor:pointer;color:#12303e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.15rem;" +
+      "background:radial-gradient(circle at 34% 28%,#ffffff 0%,#f3eee4 28%,#b9d8e3 62%,#6fb0c9 100%);" +
+      "box-shadow:0 0 0 6px rgba(85,230,200,.14),0 0 48px rgba(85,230,200,.5),inset -8px -10px 22px rgba(20,70,95,.35);transition:transform .08s ease,box-shadow .2s}",
+    ".qi-orb:active{transform:scale(.94)}",
+    ".qi-orb .e{font-size:2.5rem;line-height:1}",
+    ".qi-orb .v{font-size:.95rem;font-weight:700}",
+    ".qi-float{position:absolute;top:28%;left:50%;transform:translateX(-50%);font-weight:700;font-size:1.1rem;color:#fff;text-shadow:0 1px 8px rgba(0,0,0,.6);pointer-events:none;white-space:nowrap}",
+    ".qi-reef{display:flex;flex-wrap:wrap;gap:.35rem;justify-content:center;padding:.7rem 0 0;border-top:1px solid rgba(255,255,255,.12);min-height:2.8rem}",
+    ".qi-reef .r{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .55rem .1rem .4rem;border-radius:999px;background:rgba(255,255,255,.09);font-size:.85rem;font-variant-numeric:tabular-nums}",
+    ".qi-reef .r b{font-size:1.15rem;font-weight:400;line-height:1.3}",
+    ".qi-empty{width:100%;text-align:center;font-size:.9rem;opacity:.75;margin:0}",
+    ".qi-bub{position:absolute;bottom:-1.5rem;border-radius:50%;border:1px solid rgba(255,255,255,.32);background:rgba(255,255,255,.07);pointer-events:none;opacity:0}",
+    ".qi-gold{position:absolute;z-index:2;padding:.5rem 1rem;font-size:.9rem;font-weight:700;border-radius:999px;border:2px solid #fff3c4;cursor:pointer;color:#4a2f00;" +
+      "background:radial-gradient(circle at 30% 25%,#fff1b8,#ffc857 60%,#e09a1a);box-shadow:0 0 24px rgba(255,200,87,.85)}",
+
+    /* Meldungen */
+    ".qi-note{margin:.9rem 0 0;padding:.65rem .9rem;border-left:4px solid var(--accent);background:var(--panel);border-radius:0 8px 8px 0;font-size:.95rem}",
+    ".qi-note:empty{display:none}",
+    ".qi-ticker{margin:.55rem 0 0;color:var(--muted);font-style:italic;font-size:.9rem;min-height:1.4rem}",
+
+    /* Reiter */
+    ".qi-tabs{display:flex;flex-wrap:wrap;gap:.2rem;margin:1.1rem 0 1.4rem;padding:.25rem;border:1px solid var(--line);border-radius:1.5rem;background:var(--panel)}",
+    ".qi-tab{flex:1 1 auto;text-align:center;background:none;color:var(--muted);border-radius:999px;padding:.5rem .85rem;font-size:.92rem;white-space:nowrap}",
+    "@media (max-width:30rem){.qi-tab{padding:.5rem .55rem;font-size:.88rem}}",
+    ".qi-tab[aria-selected=true]{background-color:var(--accent);background-image:var(--accent-gradient,none);color:var(--accent-ink)}",
+
+    /* Texte */
+    ".qi-h{font-family:var(--serif);font-size:1.45rem;font-weight:600;letter-spacing:-.01em;line-height:1.2;margin:2rem 0 .4rem}",
+    ".qi-panel>.qi-h:first-child{margin-top:0}",
+    ".qi-lead{color:var(--muted);margin:0 0 1rem;max-width:34rem;font-size:.95rem}",
+
+    /* Knöpfe */
+    ".qi-btn{font:inherit;font-weight:600;font-size:.92rem;line-height:1.2;padding:.6rem 1.05rem;border:0;border-radius:999px;cursor:pointer;" +
+      "background-color:var(--accent);background-image:var(--accent-gradient,none);color:var(--accent-ink)}",
+    ".qi-btn.alt{background:var(--panel);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--accent)}",
+    ".qi-btn.block{width:100%;max-width:26rem;padding:.9rem 1.2rem;font-size:1rem}",
+    ".qi-btn:disabled{opacity:.4;cursor:not-allowed}",
+    ".qi-qty{display:inline-flex;gap:.15rem;padding:.2rem;margin:0 0 .6rem;border:1px solid var(--line);border-radius:999px;background:var(--panel)}",
+    ".qi-qty button{background:none;color:var(--muted);padding:.3rem .85rem;border-radius:999px;font-size:.88rem;font-weight:600}",
+    ".qi-qty button[aria-pressed=true]{background-color:var(--ink);background-image:none;color:var(--panel)}",
+
+    /* Zeilen (Fabriken, Forschung, Expeditionen, Quallen-Shop) */
+    ".qi-list{list-style:none;margin:0;padding:0}",
+    ".qi-row{position:relative;display:grid;grid-template-columns:2.8rem minmax(0,1fr) auto;grid-template-areas:'d n c' 'd s s' '. a a';gap:.1rem .85rem;align-items:center;padding:.9rem 0 1.05rem;border-top:1px solid var(--line)}",
+    ".qi-list>.qi-row:first-child{border-top:0}",
+    ".qi-row.done{opacity:.6}",
+    ".qi-disc{grid-area:d;align-self:start;width:2.8rem;height:2.8rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.45rem;background:color-mix(in srgb,var(--accent) 14%,var(--panel));box-shadow:inset 0 0 0 1px var(--line)}",
+    ".qi-name{grid-area:n;font-weight:650;line-height:1.25}",
+    ".qi-num{grid-area:c;font-family:var(--serif);font-size:1.6rem;font-weight:600;line-height:1;font-variant-numeric:tabular-nums;text-align:right}",
+    ".qi-sub{grid-area:s;color:var(--muted);font-size:.85rem;line-height:1.4}",
+    ".qi-acts{grid-area:a;display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.55rem}",
+    ".qi-acts:empty{display:none}",
+    ".qi-bar{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--line)}",
+    ".qi-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}",
+
+    /* Status und Fortschritt */
+    ".qi-status{padding:.95rem 1.1rem;border-radius:12px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line);margin:0 0 1.2rem}",
+    ".qi-status strong{display:block;font-family:var(--serif);font-size:1.25rem;font-weight:600;line-height:1.25}",
+    ".qi-status .qi-btn{margin-top:.7rem}",
+    ".qi-progress{height:6px;border-radius:3px;background:var(--line);margin:.65rem 0 0;overflow:hidden}",
+    ".qi-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--qi-glow));transition:width .3s}",
+    ".qi-progtext{color:var(--muted);font-size:.85rem;margin:.4rem 0 .9rem}",
+
+    /* Kacheln (Artefakte, Erfolge) */
+    ".qi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(10.5rem,1fr));gap:.6rem;list-style:none;margin:0;padding:0}",
+    ".qi-grid.small{grid-template-columns:repeat(auto-fill,minmax(8.5rem,1fr))}",
+    ".qi-tile{display:flex;flex-direction:column;gap:.15rem;min-width:0;padding:.75rem .8rem;border-radius:12px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}",
+    ".qi-tile .i{font-size:1.6rem;line-height:1.15}",
+    ".qi-tile .n{font-weight:650;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere}",
+    ".qi-tile .d{color:var(--muted);font-size:.8rem;line-height:1.35}",
+    ".qi-tile.on{box-shadow:inset 0 0 0 1.5px var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel))}",
+    ".qi-tile.off{opacity:.62}",
+    ".qi-tile.off .i{filter:grayscale(1)}",
+
+    /* Sternkarte (Galaxien und Planeten) */
+    ".qi-map{display:grid;grid-template-columns:repeat(auto-fill,minmax(6.6rem,1fr));gap:.5rem;list-style:none;margin:0 0 1rem;padding:0}",
+    ".qi-gal{min-width:0;padding:.6rem .65rem;border-radius:10px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}",
+    ".qi-gal.done{box-shadow:inset 0 0 0 1.5px var(--accent)}",
+    ".qi-gal.cur{box-shadow:inset 0 0 0 2px var(--ink)}",
+    ".qi-gal .n{font-size:.78rem;font-weight:650;line-height:1.25;overflow-wrap:anywhere}",
+    ".qi-pips{display:flex;gap:3px;flex-wrap:wrap;margin-top:.45rem}",
+    ".qi-pip{width:.55rem;height:.55rem;border-radius:50%;background:var(--line)}",
+    ".qi-pip.on{background:var(--accent)}",
+    ".qi-curgal{margin:0 0 1rem;font-size:.95rem}",
+
+    /* Zahlen-Kacheln */
+    ".qi-stats2{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:.6rem;margin:0 0 1rem}",
+    ".qi-stat{padding:.65rem .8rem;border-radius:10px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line);min-width:0}",
+    ".qi-stat .v{font-family:var(--serif);font-size:1.45rem;font-weight:600;line-height:1.15;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}",
+    ".qi-stat .l{color:var(--muted);font-size:.8rem;line-height:1.3}",
+    ".qi details{margin:.4rem 0 1rem;font-size:.92rem}",
+    ".qi summary{cursor:pointer;font-weight:600}",
+    ".qi details ul{margin:.5rem 0 0;padding-left:1.1rem;color:var(--muted)}",
+    ".qi details p{margin:.5rem 0 0;color:var(--muted)}",
+
+    /* Bewegung nur, wenn gewünscht */
+    "@media (prefers-reduced-motion:no-preference){" +
+      ".qi-bub{animation:qi-rise linear infinite}" +
+      "@keyframes qi-rise{0%{transform:translateY(0);opacity:0}15%{opacity:.8}100%{transform:translateY(-22rem);opacity:0}}" +
+      ".qi-float{animation:qi-up .8s ease-out forwards}" +
+      "@keyframes qi-up{from{opacity:1;transform:translate(-50%,0)}to{opacity:0;transform:translate(-50%,-4.5rem)}}" +
+      ".qi-gold{animation:qi-pulse 1s ease-in-out infinite alternate}" +
+      "@keyframes qi-pulse{from{transform:scale(1)}to{transform:scale(1.1)}}}",
+    "@media (prefers-reduced-motion:reduce){.qi-float{display:none}}"
+  ].join("\n");
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text) e.textContent = text;
     return e;
+  }
+
+  function qbtn(text, cls) {
+    var b = el("button", "qi-btn" + (cls ? " " + cls : ""), text);
+    b.type = "button";
+    return b;
+  }
+
+  // Eine Zeile mit Symbol, Name, Zahl rechts, Untertext, Knöpfen und Leiste unten
+  function makeRow(icon, name) {
+    var li = el("li", "qi-row");
+    var disc = el("span", "qi-disc", icon);
+    disc.setAttribute("aria-hidden", "true");
+    var nm = el("div", "qi-name", name);
+    var num = el("div", "qi-num");
+    var sub = el("div", "qi-sub");
+    var acts = el("div", "qi-acts");
+    var bar = el("div", "qi-bar");
+    var fill = el("i");
+    bar.appendChild(fill);
+    [disc, nm, num, sub, acts, bar].forEach(function (c) { li.appendChild(c); });
+    return { li: li, name: nm, num: num, sub: sub, acts: acts, fill: fill };
+  }
+
+  function setFill(node, ratio) {
+    node.style.width = Math.round(Math.max(0, Math.min(1, ratio)) * 100) + "%";
+  }
+
+  function tile(icon, name, desc) {
+    var li = el("li", "qi-tile");
+    var i = el("div", "i", icon), n = el("div", "n", name), d = el("div", "d", desc);
+    li.appendChild(i);
+    li.appendChild(n);
+    li.appendChild(d);
+    return { li: li, i: i, n: n, d: d };
+  }
+
+  function stat(label) {
+    var box = el("div", "qi-stat");
+    var v = el("div", "v"), l = el("div", "l", label);
+    box.appendChild(v);
+    box.appendChild(l);
+    return { box: box, v: v };
+  }
+
+  // Erfolgsmeldung: bei mehr als 3 neuen Erfolgen nur die ersten drei nennen
+  function achText(names, each) {
+    var shown = names.length > 3 ? names.slice(0, 3).join(", ") + " und " + (names.length - 3) + " weitere" : names.join(", ");
+    return "🏆 " + (names.length === 1 ? "Erfolg" : names.length + " Erfolge") + " freigeschaltet: " + shown + " (+" + Math.round(each * names.length * 100) + " % Produktion)";
   }
 
   function start(box) {
@@ -1096,141 +1259,180 @@
     }
     s.last = now0;
 
-    // --- Kopf ---
-    var coinsEl = el("p", "clock-big");
-    var rateEl = el("p", "msg");
-    var clickBtn = el("button", "big-btn");
-    clickBtn.type = "button";
+    var root = el("div", "qi");
+    box.appendChild(root);
 
-    var ocean = el("div", "qi-ocean");
-    ocean.setAttribute("role", "img");
-    ocean.setAttribute("aria-label", "Dein Unterwasser-Imperium");
+    // --- Meeres-Fenster ---
+    var scene = el("section", "qi-scene");
+    scene.setAttribute("aria-label", "Dein Unterwasser-Imperium");
+    for (var bi = 0; bi < 9; bi++) {
+      var bub = el("span", "qi-bub");
+      var bsize = 0.4 + ((bi * 37) % 10) / 10 * 0.9;
+      bub.setAttribute("aria-hidden", "true");
+      bub.style.cssText = "left:" + (6 + bi * 11) + "%;width:" + bsize + "rem;height:" + bsize + "rem;animation-duration:" + (7 + (bi % 4) * 2) + "s;animation-delay:-" + (bi * 1.7) + "s";
+      scene.appendChild(bub);
+    }
+    var inner = el("div", "qi-in");
+    scene.appendChild(inner);
+
+    var top = el("div", "qi-top");
+    var stageBox = el("div");
+    var stageEl = el("div", "qi-stage");
+    var stageBar = el("div", "qi-stagebar");
+    var stageFill = el("i");
+    stageBar.appendChild(stageFill);
+    stageBox.appendChild(stageEl);
+    stageBox.appendChild(stageBar);
+    var chipsEl = el("div", "qi-chips");
+    var boostChip = el("span", "qi-chip");
+    var clickChip = el("span", "qi-chip");
+    boostChip.hidden = true;
+    clickChip.hidden = true;
+    chipsEl.appendChild(boostChip);
+    chipsEl.appendChild(clickChip);
+    top.appendChild(stageBox);
+    top.appendChild(chipsEl);
+
+    var coinsEl = el("p", "qi-count");
+    var rateEl = el("p", "qi-rate");
+    var bonusEl = el("p", "qi-bonus");
+
+    var orbWrap = el("div", "qi-orbwrap");
+    var clickBtn = el("button", "qi-orb");
+    clickBtn.type = "button";
+    var orbE = el("span", "e", "🦪"), orbV = el("span", "v");
+    orbE.setAttribute("aria-hidden", "true");
+    clickBtn.appendChild(orbE);
+    clickBtn.appendChild(orbV);
+    orbWrap.appendChild(clickBtn);
+
+    var reef = el("div", "qi-reef");
     var gold = el("button", "qi-gold", "✨ Goldene Perle");
     gold.type = "button";
     gold.hidden = true;
-    ocean.appendChild(gold);
 
-    var note = el("p", "msg");
+    [top, coinsEl, rateEl, bonusEl, orbWrap, reef].forEach(function (c) { inner.appendChild(c); });
+    scene.appendChild(gold);
+    root.appendChild(scene);
+
+    var note = el("p", "qi-note");
     note.setAttribute("aria-live", "polite");
     note.textContent = welcome;
+    var ticker = el("p", "qi-ticker");
+    root.appendChild(note);
+    root.appendChild(ticker);
 
     // --- Reiter ---
-    var tabs = el("div", "chips");
-    tabs.setAttribute("role", "group");
-    tabs.setAttribute("aria-label", "Bereiche");
+    var tabsEl = el("div", "qi-tabs");
+    tabsEl.setAttribute("role", "tablist");
+    tabsEl.setAttribute("aria-label", "Bereiche");
     var tabBtns = {};
-    [["fabriken", "Fabriken"], ["forschung", "Forschung"], ["expeditionen", "Expeditionen"], ["erfolge", "Erfolge"], ["imperium", "Imperium"]].forEach(function (t) {
-      var b = el("button", "chip", t[1]);
+    [["fabriken", "🐚", "Fabriken"], ["forschung", "🔬", "Forschung"], ["expeditionen", "🧭", "Expeditionen"], ["erfolge", "🏆", "Erfolge"], ["imperium", "👑", "Imperium"]].forEach(function (t) {
+      var b = el("button", "qi-tab", t[1] + " " + t[2]);
       b.type = "button";
+      b.setAttribute("role", "tab");
       b.addEventListener("click", function () { b.blur(); tab = t[0]; showTab(); refresh(); });
-      tabs.appendChild(b);
+      tabsEl.appendChild(b);
       tabBtns[t[0]] = b;
     });
+    root.appendChild(tabsEl);
+
+    function panel() {
+      var p = el("div", "qi-panel");
+      p.setAttribute("role", "tabpanel");
+      root.appendChild(p);
+      return p;
+    }
 
     // --- Fabriken ---
-    var panelF = el("div");
-    var qtyBox = el("div", "chips qi-qty");
+    var panelF = panel();
+    var qtyBox = el("div", "qi-qty");
     qtyBox.setAttribute("role", "group");
     qtyBox.setAttribute("aria-label", "Kaufmenge");
     var qtyBtns = [];
     [[1, "x1"], [10, "x10"], [100, "x100"], ["max", "Max"]].forEach(function (q) {
-      var b = el("button", "chip", q[1]);
+      var b = el("button", "", q[1]);
       b.type = "button";
       b.addEventListener("click", function () { b.blur(); qty = q[0]; refresh(); });
       qtyBox.appendChild(b);
       qtyBtns.push({ v: q[0], el: b });
     });
     panelF.appendChild(qtyBox);
-    var shop = el("ul", "shop");
+    var shop = el("ul", "qi-list");
     var rows = BUILDINGS.map(function (b, i) {
-      var li = el("li", "shop-row");
-      var info = el("div", "shop-info");
-      info.appendChild(el("strong", "", b.icon + " " + b.name));
-      var detail = el("span", "msg");
-      info.appendChild(detail);
-      var btns = el("div", "shop-btns");
-      var buyBtn = el("button", "shop-btn");
-      buyBtn.type = "button";
-      var upBtn = el("button", "shop-btn alt");
-      upBtn.type = "button";
+      var r = makeRow(b.icon, b.name);
+      var buyBtn = qbtn("");
+      var upBtn = qbtn("", "alt");
       buyBtn.addEventListener("click", function () { if (buy(s, i, qty)) refresh(); });
       upBtn.addEventListener("click", function () { if (upgradeBuilding(s, i)) refresh(); });
-      btns.appendChild(buyBtn);
-      btns.appendChild(upBtn);
-      li.appendChild(info);
-      li.appendChild(btns);
-      shop.appendChild(li);
-      return { li: li, detail: detail, buyBtn: buyBtn, upBtn: upBtn };
+      r.acts.appendChild(buyBtn);
+      r.acts.appendChild(upBtn);
+      shop.appendChild(r.li);
+      r.buyBtn = buyBtn;
+      r.upBtn = upBtn;
+      return r;
     });
     panelF.appendChild(shop);
 
     // --- Forschung ---
-    var panelR = el("div");
-    panelR.appendChild(el("p", "label", "Pro Klick"));
-    var clickUp = el("button", "shop-btn");
-    clickUp.type = "button";
+    var panelR = panel();
+    panelR.appendChild(el("h2", "qi-h", "Klick-Verbesserung"));
+    var clickList = el("ul", "qi-list");
+    var clickRow = makeRow("👆", "");
+    var clickUp = qbtn("");
     clickUp.addEventListener("click", function () { if (upgradeClick(s)) refresh(); });
-    panelR.appendChild(clickUp);
-    panelR.appendChild(el("p", "label", "Forschung (Bonus auf die gesamte Produktion)"));
-    var rList = el("ul", "shop");
+    clickRow.acts.appendChild(clickUp);
+    clickList.appendChild(clickRow.li);
+    panelR.appendChild(clickList);
+    panelR.appendChild(el("h2", "qi-h", "Forschung"));
+    panelR.appendChild(el("p", "qi-lead", "Jede Forschung gibt einen Bonus auf die gesamte Produktion. Er gilt bis zur nächsten Imperium-Erweiterung."));
+    var rList = el("ul", "qi-list");
     var rRows = RESEARCH.map(function (r, i) {
-      var li = el("li", "shop-row");
-      var info = el("div", "shop-info");
-      info.appendChild(el("strong", "", "🔬 " + r.name));
-      info.appendChild(el("span", "msg", "+" + Math.round(r.bonus * 100) + " % Produktion"));
-      var btns = el("div", "shop-btns");
-      var b = el("button", "shop-btn");
-      b.type = "button";
+      var row = makeRow("🔬", r.name);
+      row.num.textContent = "+" + Math.round(r.bonus * 100) + " %";
+      row.sub.textContent = "Mehr Produktion für alle Fabriken";
+      var b = qbtn("");
       b.addEventListener("click", function () { if (buyResearch(s, i)) refresh(); });
-      btns.appendChild(b);
-      li.appendChild(info);
-      li.appendChild(btns);
-      rList.appendChild(li);
-      return { btn: b };
+      row.acts.appendChild(b);
+      rList.appendChild(row.li);
+      row.btn = b;
+      return row;
     });
     panelR.appendChild(rList);
 
     // --- Expeditionen ---
-    var panelE = el("div");
-    panelE.appendChild(el("p", "msg", "Schicke eine Expedition in die Tiefe. Sie läuft auch weiter, wenn die Seite geschlossen ist. Du bekommst Perlen und mit etwas Glück ein Artefakt mit dauerhaftem Produktionsbonus."));
-    var expStatus = el("p", "label");
-    var expCollect = el("button", "shop-btn", "Belohnung abholen");
-    expCollect.type = "button";
+    var panelE = panel();
+    panelE.appendChild(el("p", "qi-lead", "Schicke eine Expedition in die Tiefe. Sie läuft auch weiter, wenn die Seite geschlossen ist. Du bekommst Perlen und mit etwas Glück ein Artefakt mit dauerhaftem Produktionsbonus."));
+    var expBox = el("div", "qi-status");
+    var expStatus = el("strong");
+    var expProg = el("div", "qi-progress");
+    var expFill = el("i");
+    expProg.appendChild(expFill);
+    var expCollect = qbtn("Belohnung abholen");
     expCollect.hidden = true;
-    panelE.appendChild(expStatus);
-    panelE.appendChild(expCollect);
-    var expList = el("ul", "shop");
+    expBox.appendChild(expStatus);
+    expBox.appendChild(expProg);
+    expBox.appendChild(expCollect);
+    panelE.appendChild(expBox);
+    var expList = el("ul", "qi-list");
     var expRows = EXPEDITIONS.map(function (x, i) {
-      var li = el("li", "shop-row");
-      var info = el("div", "shop-info");
-      info.appendChild(el("strong", "", "🧭 " + x.name));
-      var desc = el("span", "msg");
-      info.appendChild(desc);
-      var btns = el("div", "shop-btns");
-      var b = el("button", "shop-btn");
-      b.type = "button";
+      var r = makeRow("🧭", x.name);
+      var b = qbtn("Losschicken");
       b.addEventListener("click", function () { if (startExpedition(s, i, Date.now())) { save(s); refresh(); } });
-      btns.appendChild(b);
-      li.appendChild(info);
-      li.appendChild(btns);
-      expList.appendChild(li);
-      return { btn: b, desc: desc };
+      r.acts.appendChild(b);
+      expList.appendChild(r.li);
+      r.btn = b;
+      return r;
     });
     panelE.appendChild(expList);
-    panelE.appendChild(el("p", "label", "Artefakte"));
-    var artInfo = el("p", "msg");
+    panelE.appendChild(el("h2", "qi-h", "Artefakte"));
+    var artInfo = el("p", "qi-lead");
     panelE.appendChild(artInfo);
-    var artList = el("ul", "shop");
-    var artRows = ARTIFACTS.map(function (a) {
-      var li = el("li", "shop-row");
-      var info = el("div", "shop-info");
-      var title = el("strong");
-      var desc = el("span", "msg");
-      info.appendChild(title);
-      info.appendChild(desc);
-      li.appendChild(info);
-      artList.appendChild(li);
-      return { title: title, desc: desc };
+    var artList = el("ul", "qi-grid small");
+    var artRows = ARTIFACTS.map(function () {
+      var t = tile("", "", "");
+      artList.appendChild(t.li);
+      return t;
     });
     panelE.appendChild(artList);
     expCollect.addEventListener("click", function () {
@@ -1243,130 +1445,153 @@
     });
 
     // --- Erfolge ---
-    var panelA = el("div");
-    var aInfo = el("p", "msg");
+    var panelA = panel();
+    var aInfo = el("p", "qi-lead");
     panelA.appendChild(aInfo);
-    var aList = el("ul", "shop");
+    var aList = el("ul", "qi-grid");
     var aRows = ACHIEVEMENTS.map(function (a) {
-      var li = el("li", "shop-row");
-      var info = el("div", "shop-info");
-      var title = el("strong", "", "");
-      info.appendChild(title);
-      info.appendChild(el("span", "msg", a.desc));
-      li.appendChild(info);
-      aList.appendChild(li);
-      return { title: title, name: a.name };
+      var t = tile("", a.name, a.desc);
+      aList.appendChild(t.li);
+      return t;
     });
     panelA.appendChild(aList);
 
     // --- Imperium ---
-    var panelI = el("div");
-    panelI.appendChild(el("p", "label", "Imperium erweitern"));
-    var pInfo = el("p", "msg");
-    var pBtn = el("button", "");
-    pBtn.type = "button";
+    var panelI = panel();
+    panelI.appendChild(el("h2", "qi-h", "Imperium erweitern"));
+    var pInfo = el("p", "qi-lead");
     panelI.appendChild(pInfo);
+    var qStats = el("div", "qi-stats2");
+    var stQ = stat("Quallen gesamt"), stFree = stat("Davon frei"), stBonus = stat("Bonus durch Quallen");
+    [stQ, stFree, stBonus].forEach(function (x) { qStats.appendChild(x.box); });
+    panelI.appendChild(qStats);
+    var pBtn = qbtn("", "block");
     panelI.appendChild(pBtn);
-    panelI.appendChild(el("p", "label", "Quallen-Shop"));
-    var perkInfo = el("p", "msg");
+
+    panelI.appendChild(el("h2", "qi-h", "Quallen-Shop"));
+    var perkInfo = el("p", "qi-lead");
     panelI.appendChild(perkInfo);
-    var perkList = el("ul", "shop");
+    var perkList = el("ul", "qi-list");
     var perkRows = PERKS.map(function (p, i) {
-      var li = el("li", "shop-row");
-      var info = el("div", "shop-info");
-      info.appendChild(el("strong", "", "🪼 " + p.name));
-      info.appendChild(el("span", "msg", p.desc));
-      var btns = el("div", "shop-btns");
-      var b = el("button", "shop-btn");
-      b.type = "button";
+      var r = makeRow("🪼", p.name);
+      r.num.textContent = p.cost + (p.cost === 1 ? " Qualle" : " Quallen");
+      r.num.style.fontSize = "1.05rem";
+      r.sub.textContent = p.desc;
+      var b = qbtn("");
       b.addEventListener("click", function () {
         if (buyPerk(s, i)) { note.textContent = "Gekauft: " + p.name + "."; save(s); refresh(); }
       });
-      btns.appendChild(b);
-      li.appendChild(info);
-      li.appendChild(btns);
-      perkList.appendChild(li);
-      return { btn: b };
+      r.acts.appendChild(b);
+      perkList.appendChild(r.li);
+      r.btn = b;
+      return r;
     });
     panelI.appendChild(perkList);
-    panelI.appendChild(el("p", "label", "Planeten"));
-    var planetInfo = el("p", "msg");
-    var planetBtn = el("button", "");
-    planetBtn.type = "button";
-    var planetList = el("p", "msg");
-    var galaxyList = el("ul", "qi-stats");
-    var milestoneList = el("ul", "qi-stats");
+
+    panelI.appendChild(el("h2", "qi-h", "Planeten"));
+    var planetInfo = el("p", "qi-lead");
     panelI.appendChild(planetInfo);
-    panelI.appendChild(planetBtn);
+    var planetProg = el("div", "qi-progress");
+    var planetFill = el("i");
+    planetProg.appendChild(planetFill);
+    var planetProgText = el("p", "qi-progtext");
+    panelI.appendChild(planetProg);
+    panelI.appendChild(planetProgText);
+    var galaxyMap = el("ul", "qi-map");
+    var galCells = GALAXIES.map(function (g) {
+      var li = el("li", "qi-gal");
+      var n = el("div", "n", "🌌 " + g.name);
+      var pips = el("div", "qi-pips");
+      var list = [];
+      for (var k = 0; k < g.size; k++) {
+        var pip = el("span", "qi-pip");
+        pips.appendChild(pip);
+        list.push(pip);
+      }
+      li.title = "Bonus bei vollständiger Besiedlung: " + g.desc;
+      li.appendChild(n);
+      li.appendChild(pips);
+      galaxyMap.appendChild(li);
+      return { li: li, pips: list };
+    });
+    panelI.appendChild(galaxyMap);
+    var planetList = el("p", "qi-curgal");
     panelI.appendChild(planetList);
-    panelI.appendChild(el("p", "label", "Galaxien (Bonus bei vollständiger Besiedlung)"));
-    panelI.appendChild(galaxyList);
-    panelI.appendChild(el("p", "label", "Planeten-Meilensteine"));
-    panelI.appendChild(milestoneList);
-    panelI.appendChild(el("p", "label", "Statistik"));
-    var statsList = el("ul", "qi-stats");
-    panelI.appendChild(statsList);
+    var planetBtn = qbtn("", "block");
+    panelI.appendChild(planetBtn);
+    var det = el("details");
+    det.appendChild(el("summary", "", "Galaxien, Boni und Meilensteine"));
+    det.appendChild(el("p", "", "Die Planeten sind in Galaxien geordnet, und jede vollständige Galaxie gibt einen eigenen Bonus. Planeten kommen einzeln, und jeder braucht mehr Quallen als der vorherige. Beim Gründen verlierst du alles, auch alle Quallen und Quallen-Fähigkeiten. Erfolge, Artefakte und Planeten bleiben."));
+    var galaxyList = el("ul");
+    var milestoneList = el("ul");
+    det.appendChild(galaxyList);
+    det.appendChild(milestoneList);
+    panelI.appendChild(det);
+
+    panelI.appendChild(el("h2", "qi-h", "Statistik"));
+    var statsBox = el("div", "qi-stats2");
+    var statDefs = ["Insgesamt verdient", "Klicks", "Imperium-Erweiterungen", "Planeten", "Planet-Gründungen", "Titel", "Erfolge", "Goldene Perlen gefangen", "Expeditionen"].map(function (l) {
+      var x = stat(l);
+      statsBox.appendChild(x.box);
+      return x;
+    });
+    panelI.appendChild(statsBox);
     var resetBtn = el("button", "link", "Ganz neu beginnen");
     resetBtn.type = "button";
     panelI.appendChild(resetBtn);
 
-    box.appendChild(coinsEl);
-    box.appendChild(rateEl);
-    box.appendChild(clickBtn);
-    box.appendChild(ocean);
-    box.appendChild(note);
-    var ticker = el("p", "msg");
-    box.appendChild(ticker);
-    box.appendChild(tabs);
-    box.appendChild(panelF);
-    box.appendChild(panelR);
-    box.appendChild(panelE);
-    box.appendChild(panelA);
-    box.appendChild(panelI);
-
     function showTab() {
-      panelF.hidden = tab !== "fabriken";
-      panelR.hidden = tab !== "forschung";
-      panelE.hidden = tab !== "expeditionen";
-      panelA.hidden = tab !== "erfolge";
-      panelI.hidden = tab !== "imperium";
-      Object.keys(tabBtns).forEach(function (k) { tabBtns[k].setAttribute("aria-pressed", String(k === tab)); });
+      var map = { fabriken: panelF, forschung: panelR, expeditionen: panelE, erfolge: panelA, imperium: panelI };
+      Object.keys(map).forEach(function (k) { map[k].hidden = k !== tab; });
+      Object.keys(tabBtns).forEach(function (k) { tabBtns[k].setAttribute("aria-selected", String(k === tab)); });
     }
 
-    var oceanSig = "";
-    function renderOcean() {
+    // Riff: eine Plakette je Fabrik, die du besitzt
+    var reefSig = "";
+    function renderReef() {
       var sig = s.owned.join(",");
-      if (sig === oceanSig) return;
-      oceanSig = sig;
-      Array.prototype.slice.call(ocean.children).forEach(function (c) { if (c !== gold) ocean.removeChild(c); });
+      if (sig === reefSig) return;
+      reefSig = sig;
+      reef.textContent = "";
       var any = false;
       BUILDINGS.forEach(function (b, i) {
         if (!s.owned[i]) return;
         any = true;
-        var shown = Math.min(s.owned[i], 10);
-        ocean.insertBefore(el("div", "qi-row", new Array(shown + 1).join(b.icon) + (s.owned[i] > shown ? " +" + (s.owned[i] - shown) : "")), gold);
+        var r = el("span", "r");
+        r.title = b.name;
+        r.appendChild(el("b", "", b.icon));
+        r.appendChild(document.createTextNode(String(s.owned[i])));
+        reef.appendChild(r);
       });
-      if (!any) ocean.insertBefore(el("span", "qi-empty", "Das Meer ist noch leer. Sammle Perlen und baue die erste Algenfarm."), gold);
+      if (!any) reef.appendChild(el("p", "qi-empty", "Das Meer ist noch leer. Sammle Perlen und baue die erste Algenfarm."));
     }
 
     function refresh() {
       var now = Date.now();
       var rate = cps(s, now);
-      coinsEl.textContent = "🦪 " + fmt(s.coins);
-      rateEl.textContent = "";
+      var count = buildingCount(s);
+
+      coinsEl.textContent = fmt(s.coins);
+      rateEl.textContent = "Perlen, +" + fmt(rate) + " pro Sekunde";
       var bonus = multiplier(s, now) / (boostActive(s, now) ? BOOST_FACTOR : 1);
-      rateEl.appendChild(document.createTextNode("Pro Sekunde: " + fmt(rate) + " · " + stageName(s) + " (" + buildingCount(s) + " Fabriken) · Bonus x" + bonus.toFixed(2).replace(".", ",")));
-      if (boostActive(s, now)) {
-        rateEl.appendChild(document.createTextNode(" · "));
-        rateEl.appendChild(el("span", "qi-boost", "Strömungsrausch x" + BOOST_FACTOR + " noch " + Math.ceil((s.boostUntil - now) / 1000) + " s"));
-      }
-      if (now < s.clickBoostUntil) {
-        rateEl.appendChild(document.createTextNode(" · "));
-        rateEl.appendChild(el("span", "qi-boost", "Klick-Segen x" + CLICK_BOOST + " noch " + Math.ceil((s.clickBoostUntil - now) / 1000) + " s"));
-      }
-      clickBtn.textContent = "🦪 Perlen sammeln (+" + fmt(clickValue(s, now)) + ")";
-      renderOcean();
-      Object.keys(tabBtns).forEach(function (k) { tabBtns[k].setAttribute("aria-pressed", String(k === tab)); });
+      bonusEl.textContent = "Bonus auf alles: x" + bonus.toFixed(2).replace(".", ",");
+
+      var prev = 0, next = null;
+      STAGES.forEach(function (stg) { if (count >= stg[0]) prev = stg[0]; else if (next === null) next = stg[0]; });
+      stageEl.textContent = stageName(s) + ", " + count + (count === 1 ? " Fabrik" : " Fabriken");
+      setFill(stageFill, next === null ? 1 : (count - prev) / (next - prev));
+      stageBar.title = next === null ? "Höchste Stufe erreicht" : "Nächste Stufe bei " + next + " Fabriken";
+
+      boostChip.hidden = !boostActive(s, now);
+      if (!boostChip.hidden) boostChip.textContent = "🌊 Strömungsrausch x" + BOOST_FACTOR + ", noch " + Math.ceil((s.boostUntil - now) / 1000) + " s";
+      clickChip.hidden = !(now < s.clickBoostUntil);
+      if (!clickChip.hidden) clickChip.textContent = "👆 Klick-Segen x" + CLICK_BOOST + ", noch " + Math.ceil((s.clickBoostUntil - now) / 1000) + " s";
+
+      var cv = fmt(clickValue(s, now));
+      orbV.textContent = "+" + cv;
+      clickBtn.setAttribute("aria-label", "Perlen sammeln, +" + cv);
+      renderReef();
+      Object.keys(tabBtns).forEach(function (k) { tabBtns[k].setAttribute("aria-selected", String(k === tab)); });
 
       if (tab === "fabriken") {
         qtyBtns.forEach(function (q) { q.el.setAttribute("aria-pressed", String(q.v === qty)); });
@@ -1379,9 +1604,11 @@
           var n = qty === "max" ? Math.max(1, maxAffordable(s, i)) : qty;
           var c = costN(i, s.owned[i], n);
           var share = rate > 0 ? Math.round(s.owned[i] * per / rate * 100) : 0;
-          r.detail.textContent = "Besitz: " + s.owned[i] + " · produziert " + b.makes + ": je " + fmt(per) + " pro Sekunde" + (s.owned[i] ? " (" + share + " % deiner Perlen)" : "");
+          r.num.textContent = String(s.owned[i]);
+          r.sub.textContent = "Je " + fmt(per) + " " + b.makes + " pro Sekunde" + (s.owned[i] ? ", das sind " + share + " % deiner Perlen" : "");
           r.buyBtn.textContent = "Bauen" + (n > 1 ? " x" + n : "") + " (" + fmt(c) + ")";
           r.buyBtn.disabled = s.coins < c;
+          setFill(r.fill, s.coins / c);
           if (canUpgrade(s, i)) {
             var price = upgradePrice(i, s.mult[i]);
             r.upBtn.hidden = false;
@@ -1394,88 +1621,117 @@
       } else if (tab === "forschung") {
         if (s.clickLevel < CLICK_UPGRADES.length) {
           var u = CLICK_UPGRADES[s.clickLevel];
+          clickRow.name.textContent = u.name;
+          clickRow.num.textContent = "x2";
+          clickRow.sub.textContent = "Verdoppelt den Ertrag pro Klick (Stufe " + (s.clickLevel + 1) + " von " + CLICK_UPGRADES.length + ")";
           clickUp.hidden = false;
-          clickUp.textContent = u.name + ": Klick x2 (" + fmt(u.cost) + ")";
+          clickUp.textContent = "Verbessern (" + fmt(u.cost) + ")";
           clickUp.disabled = s.coins < u.cost;
+          setFill(clickRow.fill, s.coins / u.cost);
+          clickRow.li.classList.remove("done");
         } else {
+          clickRow.name.textContent = "Alle Stufen gekauft";
+          clickRow.num.textContent = "";
+          clickRow.sub.textContent = "Dein Ertrag pro Klick ist voll ausgebaut.";
           clickUp.hidden = true;
+          setFill(clickRow.fill, 1);
+          clickRow.li.classList.add("done");
         }
         RESEARCH.forEach(function (r, i) {
-          var b = rRows[i].btn;
-          if (s.research[i]) { b.textContent = "✓ erforscht"; b.disabled = true; }
-          else { b.textContent = "Erforschen (" + fmt(r.cost) + ")"; b.disabled = s.coins < r.cost; }
+          var row = rRows[i], b = row.btn;
+          row.li.classList.toggle("done", !!s.research[i]);
+          if (s.research[i]) { b.textContent = "✓ erforscht"; b.disabled = true; setFill(row.fill, 1); }
+          else { b.textContent = "Erforschen (" + fmt(r.cost) + ")"; b.disabled = s.coins < r.cost; setFill(row.fill, s.coins / r.cost); }
         });
       } else if (tab === "expeditionen") {
         var running = expActive(s), ready = expReady(s, now);
-        expStatus.textContent = !running ? "Keine Expedition unterwegs." : ready ? "Die Expedition ist zurück!" :
-          EXPEDITIONS[s.exp.i].name + " ist noch " + fmtTime((s.exp.end - now) / 1000) + " unterwegs.";
+        if (!running) {
+          expStatus.textContent = "Keine Expedition unterwegs";
+          setFill(expFill, 0);
+        } else if (ready) {
+          expStatus.textContent = "Die Expedition ist zurück!";
+          setFill(expFill, 1);
+        } else {
+          var total = expSecs(s, s.exp.i) * 1000;
+          expStatus.textContent = EXPEDITIONS[s.exp.i].name + ": noch " + fmtTime((s.exp.end - now) / 1000);
+          setFill(expFill, 1 - (s.exp.end - now) / total);
+        }
+        expProg.hidden = !running;
         expCollect.hidden = !ready;
         EXPEDITIONS.forEach(function (x, i) {
           var r = expRows[i];
           var ch = Math.round(Math.min(1, x.chance * (perkOn(s, 8) ? 1.5 : 1)) * 100);
-          r.desc.textContent = "Dauer " + fmtTime(expSecs(s, i)) + " · Perlen für " + fmtTime(x.secs * expReward(s)) + " Produktion · " + ch + " % Artefakt-Chance";
-          r.btn.textContent = "Losschicken";
+          r.num.textContent = fmtTime(expSecs(s, i));
+          r.sub.textContent = "Perlen für " + fmtTime(x.secs * expReward(s)) + " Produktion, " + ch + " % Chance auf ein Artefakt";
           r.btn.disabled = running;
         });
         artInfo.textContent = artCount(s) + " von " + ARTIFACTS.length + " Artefakten gefunden (+" + Math.round((artFactor(s) - 1) * 100) + " % Produktion). Artefakte bleiben nach einer Imperium-Erweiterung erhalten.";
-        artRows.forEach(function (r, i) {
-          var a = ARTIFACTS[i];
-          r.title.textContent = s.artifacts[i] ? a.icon + " " + a.name : "❔ Unbekanntes Artefakt";
-          r.desc.textContent = s.artifacts[i] ? "+" + Math.round(a.bonus * 100) + " % Produktion" : "Noch nicht gefunden";
+        artRows.forEach(function (t, i) {
+          var a = ARTIFACTS[i], have = !!s.artifacts[i];
+          t.li.className = "qi-tile " + (have ? "on" : "off");
+          t.i.textContent = have ? a.icon : "❔";
+          t.n.textContent = have ? a.name : "Unbekanntes Artefakt";
+          t.d.textContent = have ? "+" + Math.round(a.bonus * 100) + " % Produktion" : "Noch nicht gefunden";
         });
       } else if (tab === "erfolge") {
-        aInfo.textContent = achCount(s) + " von " + ACHIEVEMENTS.length + " Erfolgen · jeder gibt dauerhaft +" + Math.round(achEach(s) * 100) +
-          " % Produktion (jetzt +" + Math.round(achEach(s) * achCount(s) * 100) + " %). Erfolge bleiben auch nach einer Imperium-Erweiterung erhalten.";
-        aRows.forEach(function (r, i) {
-          r.title.textContent = (s.ach[i] ? "🏆 " : "🔒 ") + r.name;
+        aInfo.textContent = achCount(s) + " von " + ACHIEVEMENTS.length + " Erfolgen. Jeder gibt dauerhaft +" + Math.round(achEach(s) * 100) +
+          " % Produktion (jetzt +" + Math.round(achEach(s) * achCount(s) * 100) + " %) und bleibt nach einer Imperium-Erweiterung erhalten.";
+        aRows.forEach(function (t, i) {
+          var have = !!s.ach[i];
+          t.li.className = "qi-tile " + (have ? "on" : "off");
+          t.i.textContent = have ? "🏆" : "🔒";
         });
       } else {
         var g = prestigeGain(s);
-        pInfo.textContent = "Wenn du dein Imperium erweiterst, verlierst du alle Perlen, Fabriken und Forschungen. Dafür bekommst du Quallen: Jede Qualle gibt dauerhaft +" +
-          Math.round(quallenEach(s) * 100) + " % Produktion. Du hast " + s.quallen + " Quallen, davon " + freeQuallen(s) + " frei (+" + Math.round(quallenEach(s) * freeQuallen(s) * 100) +
-          " %). In dieser Runde hast du " + fmt(s.total) + " Perlen verdient.";
+        pInfo.textContent = "Beim Erweitern verlierst du alle Perlen, Fabriken und Forschungen. Dafür bekommst du Quallen, und jede gibt dauerhaft +" +
+          Math.round(quallenEach(s) * 100) + " % Produktion. In dieser Runde hast du " + fmt(s.total) + " Perlen verdient.";
+        stQ.v.textContent = String(s.quallen);
+        stFree.v.textContent = String(freeQuallen(s));
+        stBonus.v.textContent = "+" + Math.round(quallenEach(s) * freeQuallen(s) * 100) + " %";
+        pBtn.textContent = g >= 1 ? "Imperium erweitern (+" + g + " Quallen)" : "Imperium erweitern (ab " + fmt(PRESTIGE_DIV) + " Perlen in einer Runde)";
+        pBtn.disabled = g < 1;
+
         perkInfo.textContent = "Tausche freie Quallen gegen dauerhafte Fähigkeiten. Ausgegebene Quallen geben keinen Produktionsbonus mehr. Du hast " + freeQuallen(s) + " freie Quallen.";
+        PERKS.forEach(function (p, i) {
+          var r = perkRows[i], b = r.btn;
+          r.li.classList.toggle("done", !!s.perks[i]);
+          if (s.perks[i]) { b.textContent = "✓ gekauft"; b.disabled = true; setFill(r.fill, 1); }
+          else { b.textContent = "Kaufen (" + p.cost + (p.cost === 1 ? " Qualle" : " Quallen") + ")"; b.disabled = freeQuallen(s) < p.cost; setFill(r.fill, freeQuallen(s) / p.cost); }
+        });
+
         var pg = planetGain(s);
         var allPlanets = s.planets >= TOTAL_PLANETS;
-        planetInfo.textContent = "Mit genug Quallen gründest du den nächsten Planeten: Jeder Planet gibt dauerhaft +" + Math.round(planetEach(s) * 100) +
-          " % Produktion und schaltet Meilensteine frei. Die Planeten sind in Galaxien geordnet, und jede vollständige Galaxie gibt einen eigenen Bonus. Planeten kommen einzeln, und jeder braucht mehr Quallen als der vorherige. Dafür verlierst du alles, auch alle Quallen und Quallen-Fähigkeiten. Erfolge, Artefakte und Planeten bleiben. Du hast " +
-          s.planets + " von " + TOTAL_PLANETS + " Planeten (+" + Math.round(planetEach(s) * s.planets * 100) + " %)" +
-          (allPlanets ? ". Du hast alle Planeten gegründet!" : " und in dieser Runde " + s.quallen + " von " + planetNeed(s) + " nötigen Quallen.");
+        planetInfo.textContent = "Jeder Planet gibt dauerhaft +" + Math.round(planetEach(s) * 100) + " % Produktion. Du hast " + s.planets + " von " + TOTAL_PLANETS + " Planeten (+" +
+          Math.round(planetEach(s) * s.planets * 100) + " %). Das Gründen setzt auch alle Quallen und Quallen-Fähigkeiten zurück.";
+        planetProg.hidden = allPlanets;
+        planetProgText.hidden = allPlanets;
+        if (!allPlanets) {
+          setFill(planetFill, s.quallen / planetNeed(s));
+          planetProgText.textContent = s.quallen + " von " + planetNeed(s) + " Quallen für den nächsten Planeten";
+        }
         planetBtn.textContent = allPlanets ? "Alle Planeten gegründet" : pg >= 1 ? "Planet gründen (+1 Planet)" : "Planet gründen (ab " + planetNeed(s) + " Quallen)";
         planetBtn.disabled = pg < 1;
+
         var cg = currentGalaxy(s), inGal = Math.min(s.planets - galaxyStart(cg), GALAXIES[cg].size), names = [];
         for (var pi = galaxyStart(cg); pi < s.planets && pi < GAL_END[cg]; pi++) names.push(planetName(pi));
         planetList.textContent = allPlanets ? "Alle Galaxien sind vollständig besiedelt." :
-          "Aktuelle Galaxie: 🌌 " + GALAXIES[cg].name + " (" + inGal + " von " + GALAXIES[cg].size + " Planeten)" + (names.length ? ": " + names.join(", ") : "") + ".";
+          "Aktuelle Galaxie: " + GALAXIES[cg].name + ", " + inGal + " von " + GALAXIES[cg].size + " Planeten" + (names.length ? " (" + names.join(", ") + ")" : "") + ". Bonus bei Fertigstellung: " + GALAXIES[cg].desc + ".";
         galaxyList.textContent = "";
-        GALAXIES.forEach(function (g, gi) {
+        GALAXIES.forEach(function (gx, gi) {
           var done = galaxyDone(s, gi), cur = gi === cg && !done;
-          var have = Math.max(0, Math.min(s.planets - galaxyStart(gi), g.size));
-          galaxyList.appendChild(el("li", "", (done ? "✓ " : cur ? "▶ " : "🔒 ") + "🌌 " + g.name + " (" + have + "/" + g.size + " Planeten): " + g.desc));
+          var have = Math.max(0, Math.min(s.planets - galaxyStart(gi), gx.size));
+          galCells[gi].li.className = "qi-gal" + (done ? " done" : cur ? " cur" : "");
+          galCells[gi].pips.forEach(function (pip, k) { pip.className = "qi-pip" + (k < have ? " on" : ""); });
+          galaxyList.appendChild(el("li", "", (done ? "✓ " : cur ? "▶ " : "🔒 ") + gx.name + " (" + have + "/" + gx.size + " Planeten): " + gx.desc));
         });
         milestoneList.textContent = "";
         PLANET_MILESTONES.forEach(function (m) {
           milestoneList.appendChild(el("li", "", (s.planets >= m.need ? "✓ " : "🔒 ") + m.need + (m.need === 1 ? " Planet: " : " Planeten: ") + m.desc));
         });
-        PERKS.forEach(function (p, i) {
-          var b = perkRows[i].btn;
-          if (s.perks[i]) { b.textContent = "✓ gekauft"; b.disabled = true; }
-          else { b.textContent = "Kaufen (" + p.cost + (p.cost === 1 ? " Qualle" : " Quallen") + ")"; b.disabled = freeQuallen(s) < p.cost; }
-        });
-        pBtn.textContent = g >= 1 ? "Imperium erweitern (+" + g + " Quallen)" : "Imperium erweitern (ab " + fmt(PRESTIGE_DIV) + " Perlen in einer Runde)";
-        pBtn.disabled = g < 1;
-        var lines = [
-          "Insgesamt verdient: " + fmt(s.allTime) + " Perlen",
-          "Klicks: " + fmt(s.clicks),
-          "Imperium-Erweiterungen: " + s.resets,
-          "Quallen: " + s.quallen + " (frei: " + freeQuallen(s) + ")",
-          "Planeten: " + s.planets + " (Gründungen: " + s.pResets + ")",
-          "Titel: " + titleFor(s.quallen),
-          "Erfolge: " + achCount(s) + " von " + ACHIEVEMENTS.length,
-          "Goldene Perlen gefangen: " + s.golds
-        ];
-        statsList.textContent = "";
-        lines.forEach(function (l) { statsList.appendChild(el("li", "", l)); });
+
+        var vals = [fmt(s.allTime) + " Perlen", fmt(s.clicks), String(s.resets), String(s.planets), String(s.pResets), titleFor(s.quallen),
+          achCount(s) + " von " + ACHIEVEMENTS.length, String(s.golds), String(s.expDone)];
+        vals.forEach(function (v, i) { statDefs[i].v.textContent = v; });
       }
     }
 
@@ -1483,6 +1739,9 @@
       var v = clickValue(s, Date.now());
       gain(s, v);
       s.clicks++;
+      var f = el("span", "qi-float", "+" + fmt(v));
+      orbWrap.appendChild(f);
+      setTimeout(function () { if (f.parentNode) f.parentNode.removeChild(f); }, 900);
       refresh();
     });
 
@@ -1491,7 +1750,7 @@
       if (g < 1) return;
       if (window.confirm("Imperium erweitern? Du verlierst alle Perlen, Fabriken und Forschungen und bekommst " + g + " Quallen: +" + Math.round(g * quallenEach(s) * 100) + " % Produktion für immer (oder Fähigkeiten im Quallen-Shop).")) {
         prestige(s, Date.now());
-        oceanSig = "";
+        reefSig = "";
         note.textContent = "Dein Imperium wächst! Du hast jetzt " + s.quallen + " Quallen.";
         save(s);
         refresh();
@@ -1505,13 +1764,13 @@
         (g === 1 ? " Planet" : " Planeten") + " (+" + Math.round(g * planetEach(s) * 100) + " % Produktion für immer). Erfolge, Artefakte und Planeten bleiben.")) {
         var doneBefore = galaxiesDone(s);
         planetize(s, Date.now());
-        oceanSig = "";
+        reefSig = "";
         var doneAfter = galaxiesDone(s);
         note.textContent = doneAfter > doneBefore ?
           "Galaxie vollständig: " + GALAXIES[doneAfter - 1].name + "! Bonus: " + GALAXIES[doneAfter - 1].desc + "." :
           "Ein neuer Planet! Du hast jetzt " + s.planets + " Planeten.";
         var newAch = checkAch(s);   // sofort prüfen, damit die Erfolgsmeldung diese Meldung nicht überschreibt
-        if (newAch.length) note.textContent += " 🏆 Erfolg: " + newAch.join(", ") + " (+" + Math.round(achEach(s) * newAch.length * 100) + " % Produktion).";
+        if (newAch.length) note.textContent += " " + achText(newAch, achEach(s));
         save(s);
         refresh();
       }
@@ -1520,7 +1779,7 @@
     resetBtn.addEventListener("click", function () {
       if (window.confirm("Wirklich ganz neu beginnen? Alles geht verloren, auch deine Quallen.")) {
         s = newState();
-        oceanSig = "";
+        reefSig = "";
         note.textContent = "";
         save(s);
         refresh();
@@ -1578,7 +1837,7 @@
       lastTick = now;
       if (now - lastNews > 15000) showNews(now);
       var fresh = checkAch(s);
-      if (fresh.length) note.textContent = "🏆 Erfolg freigeschaltet: " + fresh.join(", ") + " (+" + Math.round(achEach(s) * fresh.length * 100) + " % Produktion)";
+      if (fresh.length) note.textContent = achText(fresh, achEach(s));
       if (now - lastSave > 3000) { save(s); lastSave = now; }
       if (!gold.hidden && now > goldHideAt) { gold.hidden = true; nextGold = now + (45000 + Math.random() * 65000) * goldGap(s); }
       if (gold.hidden && now >= nextGold) {
