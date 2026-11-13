@@ -456,7 +456,7 @@
 ;
 // ===== quallenimperium.js =====
 // Spiel: Quallen-Imperium (Aufbauspiel unter Wasser)
-// Sammle Perlen, baue 19 Arten von Unterwasser-Fabriken, erforsche Verbesserungen, fange Goldene Perlen,
+// Sammle Perlen, baue 23 Arten von Unterwasser-Fabriken, erforsche Verbesserungen, fange Goldene Perlen,
 // schalte Erfolge frei (je +2 % Produktion, dauerhaft) und erweitere dein Imperium für einen dauerhaften Bonus. Der Fortschritt wird im Browser gespeichert
 // und läuft bis zu 8 Stunden weiter, auch wenn die Seite zu ist.
 (function () {
@@ -467,6 +467,39 @@
   var MAX_OFFLINE = 8 * 3600;
   var BOOST_FACTOR = 7, BOOST_SECONDS = 30;
   var PRESTIGE_DIV = 1e9, PRESTIGE_BONUS = 0.04;
+  var CLICK_BOOST = 10, CLICK_BOOST_SECONDS = 30;
+
+  // Titel nach Anzahl der Quallen
+  var TITLES = [[0, "Quallenlarve"], [1, "Junge Qualle"], [5, "Riffwächter"], [15, "Tiefsee-Hüter"], [40, "Meeresfürst"],
+    [100, "Quallenkönig"], [250, "Herrscher der Ozeane"], [600, "Gottqualle"]];
+  function titleFor(q) {
+    var name = TITLES[0][1];
+    TITLES.forEach(function (t) { if (q >= t[0]) name = t[1]; });
+    return name;
+  }
+
+  // Quallen-Shop: dauerhafte Verbesserungen, bezahlt mit Quallen (bleiben nach jeder Imperium-Erweiterung erhalten).
+  // Ausgegebene Quallen zählen nicht mehr für den Produktionsbonus, du tauschst also Bonus gegen Spezialfähigkeiten.
+  var PERKS = [
+    { name: "Perlen-Anfangsvorrat", cost: 1, desc: "Jede neue Runde beginnt mit 10.000 Perlen." },
+    { name: "Tiefschlaf", cost: 2, desc: "Dein Imperium arbeitet offline bis zu 24 statt 8 Stunden weiter." },
+    { name: "Goldener Magnet", cost: 3, desc: "Goldene Perlen erscheinen doppelt so oft." },
+    { name: "Starke Tentakel", cost: 3, desc: "Der Ertrag pro Klick verdoppelt sich dauerhaft." },
+    { name: "Lange Strömung", cost: 4, desc: "Strömungsrausch und Klick-Segen dauern doppelt so lang." },
+    { name: "Forschungs-Erbe", cost: 6, desc: "Die ersten 3 Forschungen sind nach jeder Erweiterung schon erledigt." },
+    { name: "Quallen-Segen", cost: 8, desc: "Jede Qualle gibt +6 % statt +4 % Produktion." }
+  ];
+  function perkOn(s, i) { return !!s.perks[i]; }
+  function spentQuallen(s) {
+    var sum = 0;
+    PERKS.forEach(function (p, i) { if (s.perks[i]) sum += p.cost; });
+    return sum;
+  }
+  function freeQuallen(s) { return Math.max(0, s.quallen - spentQuallen(s)); }
+  function quallenEach(s) { return PRESTIGE_BONUS * (perkOn(s, 6) ? 1.5 : 1); }
+  function maxOffline(s) { return perkOn(s, 1) ? 24 * 3600 : MAX_OFFLINE; }
+  function goldGap(s) { return perkOn(s, 2) ? 0.5 : 1; }
+  function boostLen(s) { return perkOn(s, 4) ? 2 : 1; }
 
   var BUILDINGS = [
     { icon: "🌿", name: "Algenfarm", makes: "Algen", cost: 15, cps: 0.2 },
@@ -487,7 +520,11 @@
     { icon: "👑", name: "Quallen-Thronsaal", makes: "Quallengold", cost: 7e13, cps: 7.5e10 },
     { icon: "🏭", name: "Chinesische-Kinderarbeit", makes: "Temu-ware", cost: 5e14, cps:9e11},
     { icon: "🌌", name: "Tiefsee-Portal", makes: "Dimensionsperlen", cost: 4.5e15, cps: 8e12 },
-    { icon: "🪼", name: "Ur-Qualle", makes: "Ur-Energie", cost: 4e16, cps: 7.5e13 }
+    { icon: "🪼", name: "Ur-Qualle", makes: "Ur-Energie", cost: 4e16, cps: 7.5e13 },
+    { icon: "🔮", name: "Orakel-Grotte", makes: "Prophezeiungen", cost: 3.5e17, cps: 6e14 },
+    { icon: "🏰", name: "Kristallpalast", makes: "Kristallstrom", cost: 3e18, cps: 5e15 },
+    { icon: "⭐", name: "Sternenmeer-Observatorium", makes: "Sternenstaub", cost: 2.8e19, cps: 4.5e16 },
+    { icon: "🌊", name: "Ozean-Bewusstsein", makes: "Gedankenwellen", cost: 2.6e20, cps: 4.2e17 }
   ];
 
   // Jede Stufe verdoppelt den Ertrag pro Klick
@@ -501,7 +538,9 @@
     { cost: 1e10, name: "Neptuns Dreizack" },
     { cost: 3e11, name: "Quallen-Magie" },
     { cost: 1e13, name: "Ur-Greifer" },
-    { cost: 5e14, name: "Portal-Hände" }
+    { cost: 5e14, name: "Portal-Hände" },
+    { cost: 2e16, name: "Orakel-Berührung" },
+    { cost: 1e18, name: "Sternen-Griff" }
   ];
 
   // Verbesserungen je Fabrik: verdoppeln den Ertrag dieser Fabrik
@@ -528,7 +567,12 @@
     { name: "Das Große Riff", cost: 7e15, bonus: 2.00 },
     { name: "Perlen-Syndikat", cost: 1.2e17, bonus: 3.00 },
     { name: "Portal-Netzwerk", cost: 2e18, bonus: 4.00 },
-    { name: "Ur-Strömung", cost: 3.5e19, bonus: 6.00 }
+    { name: "Ur-Strömung", cost: 3.5e19, bonus: 6.00 },
+    { name: "Orakel-Prophezeiung", cost: 5e20, bonus: 8.00 },
+    { name: "Kristall-Resonanz", cost: 8e21, bonus: 10.00 },
+    { name: "Sternen-Navigation", cost: 1.3e23, bonus: 14.00 },
+    { name: "Ozean-Einheit", cost: 2e24, bonus: 20.00 },
+    { name: "Das Ende der Tiefe", cost: 4e25, bonus: 30.00 }
   ];
 
   var STAGES = [[0, "Korallenlager"], [10, "Unterwasserdorf"], [30, "Riffstadt"], [70, "Tiefsee-Stadt"],
@@ -555,7 +599,18 @@
     { name: "Goldrausch", desc: "50 Goldene Perlen gefangen", check: function (s) { return s.golds >= 50; } },
     { name: "Neuanfang", desc: "Das Imperium zum ersten Mal erweitert", check: function (s) { return s.resets >= 1; } },
     { name: "Dynastie", desc: "Das Imperium 5-mal erweitert", check: function (s) { return s.resets >= 5; } },
-    { name: "Quallenschwarm", desc: "10 Quallen besitzen", check: function (s) { return s.quallen >= 10; } }
+    { name: "Quallenschwarm", desc: "10 Quallen besitzen", check: function (s) { return s.quallen >= 10; } },
+    { name: "Quallenflut", desc: "50 Quallen besitzen", check: function (s) { return s.quallen >= 50; } },
+    { name: "Unsterbliches Imperium", desc: "Das Imperium 10-mal erweitert", check: function (s) { return s.resets >= 10; } },
+    { name: "Klicklegende", desc: "100.000 Klicks", check: function (s) { return s.clicks >= 100000; } },
+    { name: "Tentakel-Gott", desc: "Alle Klick-Verbesserungen gekauft", check: function (s) { return s.clickLevel >= CLICK_UPGRADES.length; } },
+    { name: "Perlen-Imperator", desc: "Insgesamt 10 Trd. Perlen verdient", check: function (s) { return s.allTime >= 1e19; } },
+    { name: "Perlen-Gottheit", desc: "Insgesamt 10 Quad. Perlen verdient", check: function (s) { return s.allTime >= 1e22; } },
+    { name: "Jenseits der Zahlen", desc: "Insgesamt 10 Qdd. Perlen verdient", check: function (s) { return s.allTime >= 1e28; } },
+    { name: "Spezialist", desc: "100 Stück einer Fabrik", check: function (s) { return s.owned.some(function (n) { return n >= 100; }); } },
+    { name: "Großmeister", desc: "300 Stück einer Fabrik", check: function (s) { return s.owned.some(function (n) { return n >= 300; }); } },
+    { name: "Ertragsmeister", desc: "Eine Fabrik voll verbessert", check: function (s) { return s.mult.some(function (m) { return m >= MULT_RULES.length; }); } },
+    { name: "Perlenjäger", desc: "100 Goldene Perlen gefangen", check: function (s) { return s.golds >= 100; } }
   ];
 
   var UNITS = [[1e42, "Sept."], [1e39, "Sxd."], [1e36, "Sext."], [1e33, "Qid."], [1e30, "Quin."], [1e27, "Qdd."],
@@ -569,7 +624,7 @@
       coins: 0, total: 0, allTime: 0, clicks: 0,
       owned: zeros(BUILDINGS.length), mult: zeros(BUILDINGS.length), clickLevel: 0,
       research: zeros(RESEARCH.length), quallen: 0, resets: 0, boostUntil: 0, last: Date.now(),
-      ach: zeros(ACHIEVEMENTS.length), golds: 0
+      ach: zeros(ACHIEVEMENTS.length), golds: 0, clickBoostUntil: 0, perks: zeros(PERKS.length)
     };
   }
 
@@ -603,7 +658,7 @@
     return b;
   }
 
-  function quallenFactor(s) { return 1 + PRESTIGE_BONUS * s.quallen; }
+  function quallenFactor(s) { return 1 + quallenEach(s) * freeQuallen(s); }
   function boostActive(s, now) { return now < s.boostUntil; }
 
   function achCount(s) { return s.ach.reduce(function (a, b) { return a + (b ? 1 : 0); }, 0); }
@@ -625,7 +680,8 @@
   function cps(s, now) { return baseCps(s) * multiplier(s, now); }
 
   function clickValue(s, now) {
-    return Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) + cps(s, now) * 0.02;
+    var boost = (now < s.clickBoostUntil ? CLICK_BOOST : 1) * (perkOn(s, 3) ? 2 : 1);
+    return (Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) + cps(s, now) * 0.02) * boost;
   }
 
   // n: Zahl oder "max". Gibt die Anzahl der gebauten Fabriken zurück (0 = nichts gekauft).
@@ -699,7 +755,7 @@
   function prestige(s, now) {
     var g = prestigeGain(s);
     if (g < 1) return 0;
-    var keep = { quallen: s.quallen + g, resets: s.resets + 1, allTime: s.allTime, clicks: s.clicks, ach: s.ach.slice(), golds: s.golds };
+    var keep = { quallen: s.quallen + g, resets: s.resets + 1, allTime: s.allTime, clicks: s.clicks, ach: s.ach.slice(), golds: s.golds, perks: s.perks.slice() };
     var fresh = newState();
     Object.keys(fresh).forEach(function (k) { s[k] = fresh[k]; });
     s.quallen = keep.quallen;
@@ -708,8 +764,18 @@
     s.clicks = keep.clicks;
     s.ach = keep.ach;
     s.golds = keep.golds;
+    s.perks = keep.perks;
+    if (perkOn(s, 0)) { s.coins = 10000; s.total = 10000; s.allTime += 10000; }
+    if (perkOn(s, 5)) { for (var r = 0; r < 3; r++) s.research[r] = 1; }
     s.last = now;
     return g;
+  }
+
+  // Kauft eine Quallen-Verbesserung, wenn genug freie Quallen da sind
+  function buyPerk(s, i) {
+    if (!PERKS[i] || s.perks[i] || freeQuallen(s) < PERKS[i].cost) return false;
+    s.perks[i] = 1;
+    return true;
   }
 
   function fmt(n) {
@@ -744,6 +810,7 @@
         v.mult = padTo(v.mult, BUILDINGS.length);
         v.research = padTo(v.research, RESEARCH.length);
         v.ach = padTo(v.ach, ACHIEVEMENTS.length);
+        v.perks = padTo(v.perks, PERKS.length);
         if (!isFinite(v.golds)) v.golds = 0;
         if (!isFinite(v.allTime) || v.allTime < v.total) v.allTime = v.total;
         return v;
@@ -791,7 +858,7 @@
     var now0 = Date.now();
     var gap = (now0 - s.last) / 1000;
     if (gap > 1) {
-      var got = earn(s, Math.min(gap, MAX_OFFLINE), now0);
+      var got = earn(s, Math.min(gap, maxOffline(s)), now0);
       if (gap > 60 && got > 0) welcome = "Willkommen zurück! Dein Imperium hat in deiner Abwesenheit " + fmt(got) + " Perlen verdient.";
     }
     s.last = now0;
@@ -915,6 +982,28 @@
     pBtn.type = "button";
     panelI.appendChild(pInfo);
     panelI.appendChild(pBtn);
+    panelI.appendChild(el("p", "label", "Quallen-Shop"));
+    var perkInfo = el("p", "msg");
+    panelI.appendChild(perkInfo);
+    var perkList = el("ul", "shop");
+    var perkRows = PERKS.map(function (p, i) {
+      var li = el("li", "shop-row");
+      var info = el("div", "shop-info");
+      info.appendChild(el("strong", "", "🪼 " + p.name));
+      info.appendChild(el("span", "msg", p.desc));
+      var btns = el("div", "shop-btns");
+      var b = el("button", "shop-btn");
+      b.type = "button";
+      b.addEventListener("click", function () {
+        if (buyPerk(s, i)) { note.textContent = "Gekauft: " + p.name + "."; save(s); refresh(); }
+      });
+      btns.appendChild(b);
+      li.appendChild(info);
+      li.appendChild(btns);
+      perkList.appendChild(li);
+      return { btn: b };
+    });
+    panelI.appendChild(perkList);
     panelI.appendChild(el("p", "label", "Statistik"));
     var statsList = el("ul", "qi-stats");
     panelI.appendChild(statsList);
@@ -968,6 +1057,10 @@
         rateEl.appendChild(document.createTextNode(" · "));
         rateEl.appendChild(el("span", "qi-boost", "Strömungsrausch x" + BOOST_FACTOR + " noch " + Math.ceil((s.boostUntil - now) / 1000) + " s"));
       }
+      if (now < s.clickBoostUntil) {
+        rateEl.appendChild(document.createTextNode(" · "));
+        rateEl.appendChild(el("span", "qi-boost", "Klick-Segen x" + CLICK_BOOST + " noch " + Math.ceil((s.clickBoostUntil - now) / 1000) + " s"));
+      }
       clickBtn.textContent = "🦪 Perlen sammeln (+" + fmt(clickValue(s, now)) + ")";
       renderOcean();
       Object.keys(tabBtns).forEach(function (k) { tabBtns[k].setAttribute("aria-pressed", String(k === tab)); });
@@ -1018,14 +1111,22 @@
       } else {
         var g = prestigeGain(s);
         pInfo.textContent = "Wenn du dein Imperium erweiterst, verlierst du alle Perlen, Fabriken und Forschungen. Dafür bekommst du Quallen: Jede Qualle gibt dauerhaft +" +
-          Math.round(PRESTIGE_BONUS * 100) + " % Produktion. Du hast " + s.quallen + " Quallen (+" + Math.round(PRESTIGE_BONUS * s.quallen * 100) + " %). In dieser Runde hast du " + fmt(s.total) + " Perlen verdient.";
+          Math.round(quallenEach(s) * 100) + " % Produktion. Du hast " + s.quallen + " Quallen, davon " + freeQuallen(s) + " frei (+" + Math.round(quallenEach(s) * freeQuallen(s) * 100) +
+          " %). In dieser Runde hast du " + fmt(s.total) + " Perlen verdient.";
+        perkInfo.textContent = "Tausche freie Quallen gegen dauerhafte Fähigkeiten. Ausgegebene Quallen geben keinen Produktionsbonus mehr. Du hast " + freeQuallen(s) + " freie Quallen.";
+        PERKS.forEach(function (p, i) {
+          var b = perkRows[i].btn;
+          if (s.perks[i]) { b.textContent = "✓ gekauft"; b.disabled = true; }
+          else { b.textContent = "Kaufen (" + p.cost + (p.cost === 1 ? " Qualle" : " Quallen") + ")"; b.disabled = freeQuallen(s) < p.cost; }
+        });
         pBtn.textContent = g >= 1 ? "Imperium erweitern (+" + g + " Quallen)" : "Imperium erweitern (ab " + fmt(PRESTIGE_DIV) + " Perlen in einer Runde)";
         pBtn.disabled = g < 1;
         var lines = [
           "Insgesamt verdient: " + fmt(s.allTime) + " Perlen",
           "Klicks: " + fmt(s.clicks),
           "Imperium-Erweiterungen: " + s.resets,
-          "Quallen: " + s.quallen,
+          "Quallen: " + s.quallen + " (frei: " + freeQuallen(s) + ")",
+          "Titel: " + titleFor(s.quallen),
           "Erfolge: " + achCount(s) + " von " + ACHIEVEMENTS.length,
           "Goldene Perlen gefangen: " + s.golds
         ];
@@ -1044,7 +1145,7 @@
     pBtn.addEventListener("click", function () {
       var g = prestigeGain(s);
       if (g < 1) return;
-      if (window.confirm("Imperium erweitern? Du verlierst alle Perlen, Fabriken und Forschungen und bekommst " + g + " Quallen: +" + Math.round(g * PRESTIGE_BONUS * 100) + " % Produktion für immer.")) {
+      if (window.confirm("Imperium erweitern? Du verlierst alle Perlen, Fabriken und Forschungen und bekommst " + g + " Quallen: +" + Math.round(g * quallenEach(s) * 100) + " % Produktion für immer (oder Fähigkeiten im Quallen-Shop).")) {
         prestige(s, Date.now());
         oceanSig = "";
         note.textContent = "Dein Imperium wächst! Du hast jetzt " + s.quallen + " Quallen.";
@@ -1068,15 +1169,29 @@
     gold.addEventListener("click", function () {
       var now = Date.now();
       gold.hidden = true;
-      nextGold = now + 45000 + Math.random() * 65000;
+      nextGold = now + (45000 + Math.random() * 65000) * goldGap(s);
       s.golds++;
-      if (Math.random() < 0.6) {
+      var roll = Math.random();
+      var ownedIdx = [];
+      s.owned.forEach(function (n, i) { if (n > 0) ownedIdx.push(i); });
+      if (roll < 0.45) {
         var amount = Math.max(50, cps(s, now) * 120);
         gain(s, amount);
         note.textContent = "Perlenregen! Du bekommst " + fmt(amount) + " Perlen.";
+      } else if (roll < 0.75) {
+        s.boostUntil = now + BOOST_SECONDS * boostLen(s) * 1000;
+        note.textContent = "Strömungsrausch! " + BOOST_SECONDS * boostLen(s) + " Sekunden lang x" + BOOST_FACTOR + " Produktion.";
+      } else if (roll < 0.9) {
+        s.clickBoostUntil = now + CLICK_BOOST_SECONDS * boostLen(s) * 1000;
+        note.textContent = "Klick-Segen! " + CLICK_BOOST_SECONDS * boostLen(s) + " Sekunden lang x" + CLICK_BOOST + " Ertrag pro Klick.";
+      } else if (ownedIdx.length) {
+        var gi = ownedIdx[Math.floor(Math.random() * ownedIdx.length)], gn = 1 + Math.floor(Math.random() * 3);
+        s.owned[gi] += gn;
+        note.textContent = "Geschenk des Meeres! " + gn + " × " + BUILDINGS[gi].name + " gratis.";
       } else {
-        s.boostUntil = now + BOOST_SECONDS * 1000;
-        note.textContent = "Strömungsrausch! " + BOOST_SECONDS + " Sekunden lang x" + BOOST_FACTOR + " Produktion.";
+        var amount2 = Math.max(50, cps(s, now) * 120);
+        gain(s, amount2);
+        note.textContent = "Perlenregen! Du bekommst " + fmt(amount2) + " Perlen.";
       }
       refresh();
     });
@@ -1084,12 +1199,12 @@
     var lastTick = Date.now(), lastSave = Date.now();
     var timer = setInterval(function () {
       var now = Date.now();
-      earn(s, Math.min((now - lastTick) / 1000, MAX_OFFLINE), now);
+      earn(s, Math.min((now - lastTick) / 1000, maxOffline(s)), now);
       lastTick = now;
       var fresh = checkAch(s);
       if (fresh.length) note.textContent = "🏆 Erfolg freigeschaltet: " + fresh.join(", ") + " (+" + Math.round(ACH_BONUS * fresh.length * 100) + " % Produktion)";
       if (now - lastSave > 3000) { save(s); lastSave = now; }
-      if (!gold.hidden && now > goldHideAt) { gold.hidden = true; nextGold = now + 45000 + Math.random() * 65000; }
+      if (!gold.hidden && now > goldHideAt) { gold.hidden = true; nextGold = now + (45000 + Math.random() * 65000) * goldGap(s); }
       if (gold.hidden && now >= nextGold) {
         gold.style.left = (5 + Math.random() * 60) + "%";
         gold.style.top = (10 + Math.random() * 55) + "%";
@@ -1114,7 +1229,8 @@
     start: start,
     _engine: {
       BUILDINGS: BUILDINGS, RESEARCH: RESEARCH, CLICK_UPGRADES: CLICK_UPGRADES, MULT_RULES: MULT_RULES,
-      ACHIEVEMENTS: ACHIEVEMENTS, checkAch: checkAch, achCount: achCount, achFactor: achFactor, padTo: padTo,
+      PERKS: PERKS, buyPerk: buyPerk, freeQuallen: freeQuallen, quallenEach: quallenEach, maxOffline: maxOffline,
+      titleFor: titleFor, CLICK_BOOST: CLICK_BOOST, ACHIEVEMENTS: ACHIEVEMENTS, checkAch: checkAch, achCount: achCount, achFactor: achFactor, padTo: padTo,
       newState: newState, cost: cost, costN: costN, maxAffordable: maxAffordable, buy: buy, cps: cps, baseCps: baseCps,
       clickValue: clickValue, upgradeBuilding: upgradeBuilding, canUpgrade: canUpgrade, upgradePrice: upgradePrice,
       upgradeClick: upgradeClick, buyResearch: buyResearch, earn: earn, gain: gain, prestigeGain: prestigeGain, prestige: prestige,
@@ -3626,7 +3742,8 @@ var FigurenArt = (function () {
       var d = JSON.parse(data["quallenimperium-v1"]);
       c.i = [Math.floor(d.coins), Math.floor(d.total), Math.floor(d.allTime || d.total), d.clicks || 0, d.owned, d.mult,
         d.clickLevel || 0, (d.research || []).map(function (x) { return x ? 1 : 0; }).join(""), d.quallen || 0, d.resets || 0,
-        (d.ach || []).map(function (x) { return x ? 1 : 0; }).join(""), d.golds || 0];
+        (d.ach || []).map(function (x) { return x ? 1 : 0; }).join(""), d.golds || 0,
+        (d.perks || []).map(function (x) { return x ? 1 : 0; }).join("")];
     }
     if (data["wortraten-v1"]) {
       var w = JSON.parse(data["wortraten-v1"]);
@@ -3648,7 +3765,8 @@ var FigurenArt = (function () {
       data["quallenimperium-v1"] = JSON.stringify({
         coins: i[0], total: i[1], allTime: i[2], clicks: i[3], owned: i[4], mult: i[5], clickLevel: i[6],
         research: String(i[7]).split("").map(Number), quallen: i[8], resets: i[9], boostUntil: 0, last: Date.now(),
-        ach: String(i[10] || "").split("").map(Number), golds: Number(i[11]) || 0
+        ach: String(i[10] || "").split("").map(Number), golds: Number(i[11]) || 0,
+        perks: String(i[12] || "").split("").map(Number)
       });
     }
     if (c.w) {
