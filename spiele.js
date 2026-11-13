@@ -558,7 +558,8 @@
     { name: "Quallenschwarm", desc: "10 Quallen besitzen", check: function (s) { return s.quallen >= 10; } }
   ];
 
-  var UNITS = [[1e24, "Quad."], [1e21, "Trd."], [1e18, "Tri."], [1e15, "Brd."], [1e12, "Bio."], [1e9, "Mrd."], [1e6, "Mio."], [1e3, "Tsd."]];
+  var UNITS = [[1e42, "Sept."], [1e39, "Sxd."], [1e36, "Sext."], [1e33, "Qid."], [1e30, "Quin."], [1e27, "Qdd."],
+    [1e24, "Quad."], [1e21, "Trd."], [1e18, "Tri."], [1e15, "Brd."], [1e12, "Bio."], [1e9, "Mrd."], [1e6, "Mio."], [1e3, "Tsd."]];
 
   // ---------- Spielregeln ----------
   function zeros(n) { var a = []; for (var i = 0; i < n; i++) a.push(0); return a; }
@@ -714,6 +715,11 @@
   function fmt(n) {
     if (!isFinite(n)) return "∞";
     if (n < 1000) return n < 100 && Math.floor(n) !== n ? n.toFixed(1).replace(".", ",") : String(Math.floor(n));
+    if (n >= 1e45) {
+      var exp = Math.floor(Math.log10(n)), mant = n / Math.pow(10, exp);
+      if (mant >= 9.995) { mant = 1; exp++; }   // Rundung: 9,999 wird 1,00 × 10 hoch (exp+1)
+      return mant.toFixed(2).replace(".", ",") + "e" + exp;
+    }
     for (var i = 0; i < UNITS.length; i++) {
       if (n >= UNITS[i][0]) return (n / UNITS[i][0]).toFixed(2).replace(".", ",") + " " + UNITS[i][1];
     }
