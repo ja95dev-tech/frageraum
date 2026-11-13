@@ -501,11 +501,11 @@
     return sum;
   }
   function freeQuallen(s) { return Math.max(0, s.quallen - spentQuallen(s)); }
-  function quallenEach(s) { return PRESTIGE_BONUS * (perkOn(s, 6) ? 1.5 : 1); }
-  function maxOffline(s) { return perkOn(s, 1) ? 24 * 3600 : MAX_OFFLINE; }
+  function quallenEach(s) { return PRESTIGE_BONUS * (perkOn(s, 6) ? 1.5 : 1) * (galaxyDone(s, 2) ? 1.25 : 1); }
+  function maxOffline(s) { return galaxyDone(s, 4) ? 48 * 3600 : perkOn(s, 1) ? 24 * 3600 : MAX_OFFLINE; }
   function goldGap(s) { return perkOn(s, 2) || s.planets >= 3 ? 0.5 : 1; }
   function boostLen(s) { return perkOn(s, 4) ? 2 : 1; }
-  function achEach(s) { return perkOn(s, 9) ? 0.03 : ACH_BONUS; }
+  function achEach(s) { return (perkOn(s, 9) ? 0.03 : ACH_BONUS) + (galaxyDone(s, 5) ? 0.01 : 0); }
 
   // Planeten: zweite Erweiterungsstufe. Setzt auch Quallen und Quallen-Fähigkeiten zurück. Erfolge, Artefakte und Planeten bleiben.
   var PLANET_DIV = 100, PLANET_BONUS = 0.5;
@@ -521,11 +521,44 @@
     { need: 5, desc: "Expeditionen dauern halb so lang." },
     { need: 8, desc: "Imperium-Erweiterungen bringen 25 % mehr Quallen." }
   ];
-  function planetFactor(s) { return 1 + PLANET_BONUS * s.planets; }
+  // Galaxien: Die Planeten sind in 10 Galaxien mit je 5 bis 8 Planeten geordnet (zusammen 65).
+  // Jede vollständige Galaxie schaltet einen eigenen Bonus frei.
+  var GALAXIES = [
+    { name: "Nebel-Nest", size: 5, desc: "Produktion x1,5" },
+    { name: "Perlen-Spirale", size: 6, desc: "Ertrag pro Klick x3" },
+    { name: "Quallen-Wirbel", size: 7, desc: "Jede Qualle gibt 25 % mehr Bonus" },
+    { name: "Korallen-Ring", size: 8, desc: "Artefakte wirken 25 % stärker" },
+    { name: "Tiefsee-Haufen", size: 6, desc: "Offline-Zeit bis zu 48 Stunden" },
+    { name: "Strudel-Band", size: 5, desc: "Jeder Erfolg gibt +1 % mehr Produktion" },
+    { name: "Aqua-Kern", size: 7, desc: "Expeditionen bringen doppelt so viele Perlen" },
+    { name: "Sternenmeer", size: 8, desc: "Jeder Planet gibt +75 % statt +50 %" },
+    { name: "Zeit-Nebel", size: 6, desc: "Produktion x2" },
+    { name: "Das Große Meer", size: 7, desc: "Produktion x3" }
+  ];
+  var GAL_END = [], TOTAL_PLANETS = 0;
+  GALAXIES.forEach(function (g) { TOTAL_PLANETS += g.size; GAL_END.push(TOTAL_PLANETS); });
+  function galaxyStart(i) { return i === 0 ? 0 : GAL_END[i - 1]; }
+  function galaxyDone(s, i) { return s.planets >= GAL_END[i]; }
+  function galaxiesDone(s) {
+    var n = 0;
+    for (var i = 0; i < GALAXIES.length; i++) if (galaxyDone(s, i)) n++;
+    return n;
+  }
+  // Die Galaxie, an der gerade gebaut wird (die letzte, wenn alle fertig sind)
+  function currentGalaxy(s) { return Math.min(galaxiesDone(s), GALAXIES.length - 1); }
+  function galaxyFactor(s) {
+    return (galaxyDone(s, 0) ? 1.5 : 1) * (galaxyDone(s, 8) ? 2 : 1) * (galaxyDone(s, 9) ? 3 : 1);
+  }
+  function planetEach(s) { return galaxyDone(s, 7) ? 0.75 : PLANET_BONUS; }
+
+  function planetFactor(s) { return 1 + planetEach(s) * s.planets; }
   // Planeten kommen einzeln, und jeder weitere braucht mehr Quallen (100, 283, 520, 800 …)
   function planetNeed(s) { return Math.ceil(PLANET_DIV * Math.pow(s.planets + 1, 1.5)); }
-  function planetGain(s) { return s.quallen >= planetNeed(s) ? 1 : 0; }
-  function planetName(i) { return PLANETS[i] ? PLANETS[i].icon + " " + PLANETS[i].name : "🌐 Planet " + (i + 1); }
+  function planetGain(s) { return s.planets < TOTAL_PLANETS && s.quallen >= planetNeed(s) ? 1 : 0; }
+  function planetName(i) {
+    var base = PLANETS[i % PLANETS.length], round = Math.floor(i / PLANETS.length);
+    return base.icon + " " + base.name + (round ? " " + (round + 1) : "");
+  }
   function rainAmount(s, now) { return Math.max(50, cps(s, now) * 120) * (perkOn(s, 10) ? 2 : 1); }
 
   // Artefakte: werden auf Expeditionen gefunden, geben dauerhaft Produktionsbonus und bleiben nach jeder Erweiterung erhalten
@@ -546,7 +579,7 @@
   function artCount(s) { return s.artifacts.reduce(function (a, b) { return a + (b ? 1 : 0); }, 0); }
   function artFactor(s) {
     var f = 1;
-    ARTIFACTS.forEach(function (a, i) { if (s.artifacts[i]) f += a.bonus; });
+    ARTIFACTS.forEach(function (a, i) { if (s.artifacts[i]) f += a.bonus * (galaxyDone(s, 3) ? 1.25 : 1); });
     return f;
   }
 
@@ -558,6 +591,7 @@
     { name: "Expedition ins Unbekannte", secs: 4 * 3600, chance: 1 }
   ];
   var EXP_REWARD = 1.5;   // Belohnung = Produktion von (Dauer × 1,5) Sekunden
+  function expReward(s) { return EXP_REWARD * (galaxyDone(s, 6) ? 2 : 1); }
   function expSecs(s, i) { return EXPEDITIONS[i].secs / (perkOn(s, 7) || s.planets >= 5 ? 2 : 1); }
   function expActive(s) { return !!s.exp; }
   function expReady(s, now) { return !!s.exp && now >= s.exp.end; }
@@ -572,7 +606,7 @@
   function collectExpedition(s, now, rand) {
     if (!expReady(s, now)) return null;
     var def = EXPEDITIONS[s.exp.i];
-    var perlen = cps(s, now) * def.secs * EXP_REWARD;
+    var perlen = cps(s, now) * def.secs * expReward(s);
     gain(s, perlen);
     s.exp = null;
     s.expDone++;
@@ -777,7 +811,10 @@
     { name: "Erster Planet", desc: "Den ersten Planeten gegründet", check: function (s) { return s.planets >= 1; } },
     { name: "Planetenjäger", desc: "5 Planeten", check: function (s) { return s.planets >= 5; } },
     { name: "Herr der Planeten", desc: "10 Planeten", check: function (s) { return s.planets >= 10; } },
-    { name: "Kosmischer Herrscher", desc: "25 Planeten", check: function (s) { return s.planets >= 25; } }
+    { name: "Kosmischer Herrscher", desc: "25 Planeten", check: function (s) { return s.planets >= 25; } },
+    { name: "Erste Galaxie", desc: "Eine Galaxie vollständig besiedelt", check: function (s) { return galaxiesDone(s) >= 1; } },
+    { name: "Galaxienforscher", desc: "3 Galaxien vollständig besiedelt", check: function (s) { return galaxiesDone(s) >= 3; } },
+    { name: "Herr der Galaxien", desc: "Alle Galaxien vollständig besiedelt", check: function (s) { return galaxiesDone(s) >= GALAXIES.length; } }
   );
 
   var UNITS = [[1e42, "Sept."], [1e39, "Sxd."], [1e36, "Sext."], [1e33, "Qid."], [1e30, "Quin."], [1e27, "Qdd."],
@@ -842,14 +879,14 @@
   }
 
   function multiplier(s, now) {
-    return (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * planetFactor(s) * (boostActive(s, now) ? BOOST_FACTOR : 1);
+    return (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * planetFactor(s) * galaxyFactor(s) * (boostActive(s, now) ? BOOST_FACTOR : 1);
   }
 
   function cps(s, now) { return baseCps(s) * multiplier(s, now); }
 
   function clickValue(s, now) {
-    var boost = (now < s.clickBoostUntil ? CLICK_BOOST : 1) * (perkOn(s, 3) ? 2 : 1) * (s.planets >= 2 ? 2 : 1);
-    return (Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * planetFactor(s) + cps(s, now) * 0.02) * boost;
+    var boost = (now < s.clickBoostUntil ? CLICK_BOOST : 1) * (perkOn(s, 3) ? 2 : 1) * (s.planets >= 2 ? 2 : 1) * (galaxyDone(s, 1) ? 3 : 1);
+    return (Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * planetFactor(s) * galaxyFactor(s) + cps(s, now) * 0.02) * boost;
   }
 
   // n: Zahl oder "max". Gibt die Anzahl der gebauten Fabriken zurück (0 = nichts gekauft).
@@ -1257,10 +1294,14 @@
     var planetBtn = el("button", "");
     planetBtn.type = "button";
     var planetList = el("p", "msg");
+    var galaxyList = el("ul", "qi-stats");
     var milestoneList = el("ul", "qi-stats");
     panelI.appendChild(planetInfo);
     panelI.appendChild(planetBtn);
     panelI.appendChild(planetList);
+    panelI.appendChild(el("p", "label", "Galaxien (Bonus bei vollständiger Besiedlung)"));
+    panelI.appendChild(galaxyList);
+    panelI.appendChild(el("p", "label", "Planeten-Meilensteine"));
     panelI.appendChild(milestoneList);
     panelI.appendChild(el("p", "label", "Statistik"));
     var statsList = el("ul", "qi-stats");
@@ -1372,7 +1413,7 @@
         EXPEDITIONS.forEach(function (x, i) {
           var r = expRows[i];
           var ch = Math.round(Math.min(1, x.chance * (perkOn(s, 8) ? 1.5 : 1)) * 100);
-          r.desc.textContent = "Dauer " + fmtTime(expSecs(s, i)) + " · Perlen für " + fmtTime(x.secs * EXP_REWARD) + " Produktion · " + ch + " % Artefakt-Chance";
+          r.desc.textContent = "Dauer " + fmtTime(expSecs(s, i)) + " · Perlen für " + fmtTime(x.secs * expReward(s)) + " Produktion · " + ch + " % Artefakt-Chance";
           r.btn.textContent = "Losschicken";
           r.btn.disabled = running;
         });
@@ -1395,14 +1436,23 @@
           " %). In dieser Runde hast du " + fmt(s.total) + " Perlen verdient.";
         perkInfo.textContent = "Tausche freie Quallen gegen dauerhafte Fähigkeiten. Ausgegebene Quallen geben keinen Produktionsbonus mehr. Du hast " + freeQuallen(s) + " freie Quallen.";
         var pg = planetGain(s);
-        planetInfo.textContent = "Mit genug Quallen gründest du den nächsten Planeten: Jeder Planet gibt dauerhaft +" + Math.round(PLANET_BONUS * 100) +
-          " % Produktion und schaltet Meilensteine frei. Planeten kommen einzeln, und jeder braucht mehr Quallen als der vorherige. Dafür verlierst du alles, auch alle Quallen und Quallen-Fähigkeiten. Erfolge, Artefakte und Planeten bleiben. Du hast " +
-          s.planets + " Planeten (+" + Math.round(PLANET_BONUS * s.planets * 100) + " %) und in dieser Runde " + s.quallen + " von " + planetNeed(s) + " nötigen Quallen.";
-        planetBtn.textContent = pg >= 1 ? "Planet gründen (+1 Planet)" : "Planet gründen (ab " + planetNeed(s) + " Quallen)";
+        var allPlanets = s.planets >= TOTAL_PLANETS;
+        planetInfo.textContent = "Mit genug Quallen gründest du den nächsten Planeten: Jeder Planet gibt dauerhaft +" + Math.round(planetEach(s) * 100) +
+          " % Produktion und schaltet Meilensteine frei. Die Planeten sind in Galaxien geordnet, und jede vollständige Galaxie gibt einen eigenen Bonus. Planeten kommen einzeln, und jeder braucht mehr Quallen als der vorherige. Dafür verlierst du alles, auch alle Quallen und Quallen-Fähigkeiten. Erfolge, Artefakte und Planeten bleiben. Du hast " +
+          s.planets + " von " + TOTAL_PLANETS + " Planeten (+" + Math.round(planetEach(s) * s.planets * 100) + " %)" +
+          (allPlanets ? ". Du hast alle Planeten gegründet!" : " und in dieser Runde " + s.quallen + " von " + planetNeed(s) + " nötigen Quallen.");
+        planetBtn.textContent = allPlanets ? "Alle Planeten gegründet" : pg >= 1 ? "Planet gründen (+1 Planet)" : "Planet gründen (ab " + planetNeed(s) + " Quallen)";
         planetBtn.disabled = pg < 1;
-        var names = [];
-        for (var pi = 0; pi < Math.min(s.planets, 24); pi++) names.push(planetName(pi));
-        planetList.textContent = s.planets ? "Deine Planeten: " + names.join(", ") + (s.planets > 24 ? " und " + (s.planets - 24) + " weitere" : "") : "Du hast noch keine Planeten.";
+        var cg = currentGalaxy(s), inGal = Math.min(s.planets - galaxyStart(cg), GALAXIES[cg].size), names = [];
+        for (var pi = galaxyStart(cg); pi < s.planets && pi < GAL_END[cg]; pi++) names.push(planetName(pi));
+        planetList.textContent = allPlanets ? "Alle Galaxien sind vollständig besiedelt." :
+          "Aktuelle Galaxie: 🌌 " + GALAXIES[cg].name + " (" + inGal + " von " + GALAXIES[cg].size + " Planeten)" + (names.length ? ": " + names.join(", ") : "") + ".";
+        galaxyList.textContent = "";
+        GALAXIES.forEach(function (g, gi) {
+          var done = galaxyDone(s, gi), cur = gi === cg && !done;
+          var have = Math.max(0, Math.min(s.planets - galaxyStart(gi), g.size));
+          galaxyList.appendChild(el("li", "", (done ? "✓ " : cur ? "▶ " : "🔒 ") + "🌌 " + g.name + " (" + have + "/" + g.size + " Planeten): " + g.desc));
+        });
         milestoneList.textContent = "";
         PLANET_MILESTONES.forEach(function (m) {
           milestoneList.appendChild(el("li", "", (s.planets >= m.need ? "✓ " : "🔒 ") + m.need + (m.need === 1 ? " Planet: " : " Planeten: ") + m.desc));
@@ -1452,10 +1502,16 @@
       var g = planetGain(s);
       if (g < 1) return;
       if (window.confirm("Planet gründen? Du verlierst alles: Perlen, Fabriken, Forschungen, Quallen und Quallen-Fähigkeiten. Du bekommst " + g +
-        (g === 1 ? " Planet" : " Planeten") + " (+" + Math.round(g * PLANET_BONUS * 100) + " % Produktion für immer). Erfolge, Artefakte und Planeten bleiben.")) {
+        (g === 1 ? " Planet" : " Planeten") + " (+" + Math.round(g * planetEach(s) * 100) + " % Produktion für immer). Erfolge, Artefakte und Planeten bleiben.")) {
+        var doneBefore = galaxiesDone(s);
         planetize(s, Date.now());
         oceanSig = "";
-        note.textContent = "Ein neuer Planet! Du hast jetzt " + s.planets + " Planeten.";
+        var doneAfter = galaxiesDone(s);
+        note.textContent = doneAfter > doneBefore ?
+          "Galaxie vollständig: " + GALAXIES[doneAfter - 1].name + "! Bonus: " + GALAXIES[doneAfter - 1].desc + "." :
+          "Ein neuer Planet! Du hast jetzt " + s.planets + " Planeten.";
+        var newAch = checkAch(s);   // sofort prüfen, damit die Erfolgsmeldung diese Meldung nicht überschreibt
+        if (newAch.length) note.textContent += " 🏆 Erfolg: " + newAch.join(", ") + " (+" + Math.round(achEach(s) * newAch.length * 100) + " % Produktion).";
         save(s);
         refresh();
       }
@@ -1549,6 +1605,8 @@
     start: start,
     _engine: {
       BUILDINGS: BUILDINGS, RESEARCH: RESEARCH, CLICK_UPGRADES: CLICK_UPGRADES, MULT_RULES: MULT_RULES,
+      GALAXIES: GALAXIES, GAL_END: GAL_END, TOTAL_PLANETS: TOTAL_PLANETS, galaxyDone: galaxyDone, galaxiesDone: galaxiesDone,
+      galaxyFactor: galaxyFactor, planetEach: planetEach, planetName: planetName,
       PLANETS: PLANETS, PLANET_MILESTONES: PLANET_MILESTONES, planetNeed: planetNeed, planetGain: planetGain, planetize: planetize, planetFactor: planetFactor,
       ARTIFACTS: ARTIFACTS, EXPEDITIONS: EXPEDITIONS, NEWS: NEWS, newsPool: newsPool, artFactor: artFactor, artCount: artCount,
       startExpedition: startExpedition, collectExpedition: collectExpedition, expSecs: expSecs, fmtTime: fmtTime, achEach: achEach,
