@@ -503,9 +503,29 @@
   function freeQuallen(s) { return Math.max(0, s.quallen - spentQuallen(s)); }
   function quallenEach(s) { return PRESTIGE_BONUS * (perkOn(s, 6) ? 1.5 : 1); }
   function maxOffline(s) { return perkOn(s, 1) ? 24 * 3600 : MAX_OFFLINE; }
-  function goldGap(s) { return perkOn(s, 2) ? 0.5 : 1; }
+  function goldGap(s) { return perkOn(s, 2) || s.planets >= 3 ? 0.5 : 1; }
   function boostLen(s) { return perkOn(s, 4) ? 2 : 1; }
   function achEach(s) { return perkOn(s, 9) ? 0.03 : ACH_BONUS; }
+
+  // Planeten: zweite Erweiterungsstufe. Setzt auch Quallen und Quallen-Fähigkeiten zurück. Erfolge, Artefakte und Planeten bleiben.
+  var PLANET_DIV = 100, PLANET_BONUS = 0.5;
+  var PLANETS = [
+    { icon: "🌍", name: "Aquaria" }, { icon: "🪐", name: "Thalassa" }, { icon: "🌕", name: "Nerida" }, { icon: "🔵", name: "Oceanus" },
+    { icon: "🟣", name: "Abyssia" }, { icon: "🟢", name: "Coralis" }, { icon: "🟠", name: "Perlonia" }, { icon: "🔴", name: "Kraken-Prime" },
+    { icon: "⚪", name: "Nautilus" }, { icon: "🟡", name: "Medusa" }, { icon: "🌑", name: "Tiefenrund" }, { icon: "🌐", name: "Neu-Neptun" }
+  ];
+  var PLANET_MILESTONES = [
+    { need: 1, desc: "Nach jeder Erweiterung startest du mit 1 Mio. Perlen." },
+    { need: 2, desc: "Der Ertrag pro Klick verdoppelt sich." },
+    { need: 3, desc: "Goldene Perlen erscheinen doppelt so oft." },
+    { need: 5, desc: "Expeditionen dauern halb so lang." },
+    { need: 8, desc: "Imperium-Erweiterungen bringen 25 % mehr Quallen." }
+  ];
+  function planetFactor(s) { return 1 + PLANET_BONUS * s.planets; }
+  // Planeten kommen einzeln, und jeder weitere braucht mehr Quallen (100, 283, 520, 800 …)
+  function planetNeed(s) { return Math.ceil(PLANET_DIV * Math.pow(s.planets + 1, 1.5)); }
+  function planetGain(s) { return s.quallen >= planetNeed(s) ? 1 : 0; }
+  function planetName(i) { return PLANETS[i] ? PLANETS[i].icon + " " + PLANETS[i].name : "🌐 Planet " + (i + 1); }
   function rainAmount(s, now) { return Math.max(50, cps(s, now) * 120) * (perkOn(s, 10) ? 2 : 1); }
 
   // Artefakte: werden auf Expeditionen gefunden, geben dauerhaft Produktionsbonus und bleiben nach jeder Erweiterung erhalten
@@ -538,7 +558,7 @@
     { name: "Expedition ins Unbekannte", secs: 4 * 3600, chance: 1 }
   ];
   var EXP_REWARD = 1.5;   // Belohnung = Produktion von (Dauer × 1,5) Sekunden
-  function expSecs(s, i) { return EXPEDITIONS[i].secs / (perkOn(s, 7) ? 2 : 1); }
+  function expSecs(s, i) { return EXPEDITIONS[i].secs / (perkOn(s, 7) || s.planets >= 5 ? 2 : 1); }
   function expActive(s) { return !!s.exp; }
   function expReady(s, now) { return !!s.exp && now >= s.exp.end; }
 
@@ -604,7 +624,12 @@
   ];
   function newsPool(s) {
     var n = buildingCount(s);
-    return NEWS.filter(function (x) { return n >= x[0]; });
+    var pool = NEWS.filter(function (x) { return n >= x[0]; });
+    if (s.planets >= 1) {
+      pool.push([0, "Auf deinem neuen Planeten wachsen die ersten Algen."], [0, "Raumschiffe voller Garnelen melden: Landung geglückt."],
+        [0, "Zwei Monde umkreisen dein Imperium und finden es großartig."]);
+    }
+    return pool;
   }
 
   var BUILDINGS = [
@@ -748,6 +773,12 @@
   BUILDINGS.forEach(function (b, i) {
     ACHIEVEMENTS.push({ name: b.icon + " " + b.name + "-Meister", desc: "25 × " + b.name, check: function (s) { return s.owned[i] >= 25; } });
   });
+  ACHIEVEMENTS.push(
+    { name: "Erster Planet", desc: "Den ersten Planeten gegründet", check: function (s) { return s.planets >= 1; } },
+    { name: "Planetenjäger", desc: "5 Planeten", check: function (s) { return s.planets >= 5; } },
+    { name: "Herr der Planeten", desc: "10 Planeten", check: function (s) { return s.planets >= 10; } },
+    { name: "Kosmischer Herrscher", desc: "25 Planeten", check: function (s) { return s.planets >= 25; } }
+  );
 
   var UNITS = [[1e42, "Sept."], [1e39, "Sxd."], [1e36, "Sext."], [1e33, "Qid."], [1e30, "Quin."], [1e27, "Qdd."],
     [1e24, "Quad."], [1e21, "Trd."], [1e18, "Tri."], [1e15, "Brd."], [1e12, "Bio."], [1e9, "Mrd."], [1e6, "Mio."], [1e3, "Tsd."]];
@@ -761,7 +792,7 @@
       owned: zeros(BUILDINGS.length), mult: zeros(BUILDINGS.length), clickLevel: 0,
       research: zeros(RESEARCH.length), quallen: 0, resets: 0, boostUntil: 0, last: Date.now(),
       ach: zeros(ACHIEVEMENTS.length), golds: 0, clickBoostUntil: 0, perks: zeros(PERKS.length),
-      artifacts: zeros(ARTIFACTS.length), expDone: 0, exp: null
+      artifacts: zeros(ARTIFACTS.length), expDone: 0, exp: null, planets: 0, pResets: 0
     };
   }
 
@@ -811,14 +842,14 @@
   }
 
   function multiplier(s, now) {
-    return (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * (boostActive(s, now) ? BOOST_FACTOR : 1);
+    return (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * planetFactor(s) * (boostActive(s, now) ? BOOST_FACTOR : 1);
   }
 
   function cps(s, now) { return baseCps(s) * multiplier(s, now); }
 
   function clickValue(s, now) {
-    var boost = (now < s.clickBoostUntil ? CLICK_BOOST : 1) * (perkOn(s, 3) ? 2 : 1);
-    return (Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) + cps(s, now) * 0.02) * boost;
+    var boost = (now < s.clickBoostUntil ? CLICK_BOOST : 1) * (perkOn(s, 3) ? 2 : 1) * (s.planets >= 2 ? 2 : 1);
+    return (Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * artFactor(s) * planetFactor(s) + cps(s, now) * 0.02) * boost;
   }
 
   // n: Zahl oder "max". Gibt die Anzahl der gebauten Fabriken zurück (0 = nichts gekauft).
@@ -887,12 +918,12 @@
   }
 
   // Imperium erweitern: so viele Quallen gibt es für diese Runde
-  function prestigeGain(s) { return Math.floor(Math.sqrt(s.total / PRESTIGE_DIV) * (perkOn(s, 11) ? 1.25 : 1)); }
+  function prestigeGain(s) { return Math.floor(Math.sqrt(s.total / PRESTIGE_DIV) * (perkOn(s, 11) || s.planets >= 8 ? 1.25 : 1)); }
 
   function prestige(s, now) {
     var g = prestigeGain(s);
     if (g < 1) return 0;
-    var keep = { quallen: s.quallen + g, resets: s.resets + 1, allTime: s.allTime, clicks: s.clicks, ach: s.ach.slice(), golds: s.golds, perks: s.perks.slice(), artifacts: s.artifacts.slice(), expDone: s.expDone, exp: s.exp };
+    var keep = { quallen: s.quallen + g, resets: s.resets + 1, allTime: s.allTime, clicks: s.clicks, ach: s.ach.slice(), golds: s.golds, perks: s.perks.slice(), artifacts: s.artifacts.slice(), expDone: s.expDone, exp: s.exp, planets: s.planets, pResets: s.pResets };
     var fresh = newState();
     Object.keys(fresh).forEach(function (k) { s[k] = fresh[k]; });
     s.quallen = keep.quallen;
@@ -905,8 +936,30 @@
     s.artifacts = keep.artifacts;
     s.expDone = keep.expDone;
     s.exp = keep.exp;
-    if (perkOn(s, 0)) { s.coins = 10000; s.total = 10000; s.allTime += 10000; }
+    s.planets = keep.planets;
+    s.pResets = keep.pResets;
+    grantStart(s);
     if (perkOn(s, 5)) { for (var r = 0; r < 3; r++) s.research[r] = 1; }
+    s.last = now;
+    return g;
+  }
+
+  // Startperlen nach einer Erweiterung: Anfangsvorrat-Fähigkeit und Planeten-Meilenstein
+  function grantStart(s) {
+    var c = Math.max(perkOn(s, 0) ? 10000 : 0, s.planets >= 1 ? 1e6 : 0);
+    if (c > 0) { s.coins = c; s.total = c; s.allTime += c; }
+  }
+
+  // Planet gründen: setzt Perlen, Fabriken, Forschung, Quallen und Quallen-Fähigkeiten zurück. Gibt die Zahl neuer Planeten zurück.
+  function planetize(s, now) {
+    var g = planetGain(s);
+    if (g < 1) return 0;
+    var keep = { planets: s.planets + g, pResets: s.pResets + 1, resets: s.resets, allTime: s.allTime, clicks: s.clicks,
+      ach: s.ach.slice(), golds: s.golds, artifacts: s.artifacts.slice(), expDone: s.expDone, exp: s.exp };
+    var fresh = newState();
+    Object.keys(fresh).forEach(function (k) { s[k] = fresh[k]; });
+    Object.keys(keep).forEach(function (k) { s[k] = keep[k]; });
+    grantStart(s);
     s.last = now;
     return g;
   }
@@ -1199,6 +1252,16 @@
       return { btn: b };
     });
     panelI.appendChild(perkList);
+    panelI.appendChild(el("p", "label", "Planeten"));
+    var planetInfo = el("p", "msg");
+    var planetBtn = el("button", "");
+    planetBtn.type = "button";
+    var planetList = el("p", "msg");
+    var milestoneList = el("ul", "qi-stats");
+    panelI.appendChild(planetInfo);
+    panelI.appendChild(planetBtn);
+    panelI.appendChild(planetList);
+    panelI.appendChild(milestoneList);
     panelI.appendChild(el("p", "label", "Statistik"));
     var statsList = el("ul", "qi-stats");
     panelI.appendChild(statsList);
@@ -1331,6 +1394,19 @@
           Math.round(quallenEach(s) * 100) + " % Produktion. Du hast " + s.quallen + " Quallen, davon " + freeQuallen(s) + " frei (+" + Math.round(quallenEach(s) * freeQuallen(s) * 100) +
           " %). In dieser Runde hast du " + fmt(s.total) + " Perlen verdient.";
         perkInfo.textContent = "Tausche freie Quallen gegen dauerhafte Fähigkeiten. Ausgegebene Quallen geben keinen Produktionsbonus mehr. Du hast " + freeQuallen(s) + " freie Quallen.";
+        var pg = planetGain(s);
+        planetInfo.textContent = "Mit genug Quallen gründest du den nächsten Planeten: Jeder Planet gibt dauerhaft +" + Math.round(PLANET_BONUS * 100) +
+          " % Produktion und schaltet Meilensteine frei. Planeten kommen einzeln, und jeder braucht mehr Quallen als der vorherige. Dafür verlierst du alles, auch alle Quallen und Quallen-Fähigkeiten. Erfolge, Artefakte und Planeten bleiben. Du hast " +
+          s.planets + " Planeten (+" + Math.round(PLANET_BONUS * s.planets * 100) + " %) und in dieser Runde " + s.quallen + " von " + planetNeed(s) + " nötigen Quallen.";
+        planetBtn.textContent = pg >= 1 ? "Planet gründen (+1 Planet)" : "Planet gründen (ab " + planetNeed(s) + " Quallen)";
+        planetBtn.disabled = pg < 1;
+        var names = [];
+        for (var pi = 0; pi < Math.min(s.planets, 24); pi++) names.push(planetName(pi));
+        planetList.textContent = s.planets ? "Deine Planeten: " + names.join(", ") + (s.planets > 24 ? " und " + (s.planets - 24) + " weitere" : "") : "Du hast noch keine Planeten.";
+        milestoneList.textContent = "";
+        PLANET_MILESTONES.forEach(function (m) {
+          milestoneList.appendChild(el("li", "", (s.planets >= m.need ? "✓ " : "🔒 ") + m.need + (m.need === 1 ? " Planet: " : " Planeten: ") + m.desc));
+        });
         PERKS.forEach(function (p, i) {
           var b = perkRows[i].btn;
           if (s.perks[i]) { b.textContent = "✓ gekauft"; b.disabled = true; }
@@ -1343,6 +1419,7 @@
           "Klicks: " + fmt(s.clicks),
           "Imperium-Erweiterungen: " + s.resets,
           "Quallen: " + s.quallen + " (frei: " + freeQuallen(s) + ")",
+          "Planeten: " + s.planets + " (Gründungen: " + s.pResets + ")",
           "Titel: " + titleFor(s.quallen),
           "Erfolge: " + achCount(s) + " von " + ACHIEVEMENTS.length,
           "Goldene Perlen gefangen: " + s.golds
@@ -1366,6 +1443,19 @@
         prestige(s, Date.now());
         oceanSig = "";
         note.textContent = "Dein Imperium wächst! Du hast jetzt " + s.quallen + " Quallen.";
+        save(s);
+        refresh();
+      }
+    });
+
+    planetBtn.addEventListener("click", function () {
+      var g = planetGain(s);
+      if (g < 1) return;
+      if (window.confirm("Planet gründen? Du verlierst alles: Perlen, Fabriken, Forschungen, Quallen und Quallen-Fähigkeiten. Du bekommst " + g +
+        (g === 1 ? " Planet" : " Planeten") + " (+" + Math.round(g * PLANET_BONUS * 100) + " % Produktion für immer). Erfolge, Artefakte und Planeten bleiben.")) {
+        planetize(s, Date.now());
+        oceanSig = "";
+        note.textContent = "Ein neuer Planet! Du hast jetzt " + s.planets + " Planeten.";
         save(s);
         refresh();
       }
@@ -1459,6 +1549,7 @@
     start: start,
     _engine: {
       BUILDINGS: BUILDINGS, RESEARCH: RESEARCH, CLICK_UPGRADES: CLICK_UPGRADES, MULT_RULES: MULT_RULES,
+      PLANETS: PLANETS, PLANET_MILESTONES: PLANET_MILESTONES, planetNeed: planetNeed, planetGain: planetGain, planetize: planetize, planetFactor: planetFactor,
       ARTIFACTS: ARTIFACTS, EXPEDITIONS: EXPEDITIONS, NEWS: NEWS, newsPool: newsPool, artFactor: artFactor, artCount: artCount,
       startExpedition: startExpedition, collectExpedition: collectExpedition, expSecs: expSecs, fmtTime: fmtTime, achEach: achEach,
       PERKS: PERKS, buyPerk: buyPerk, freeQuallen: freeQuallen, quallenEach: quallenEach, maxOffline: maxOffline,
@@ -3976,7 +4067,7 @@ var FigurenArt = (function () {
         d.clickLevel || 0, (d.research || []).map(function (x) { return x ? 1 : 0; }).join(""), d.quallen || 0, d.resets || 0,
         (d.ach || []).map(function (x) { return x ? 1 : 0; }).join(""), d.golds || 0,
         (d.perks || []).map(function (x) { return x ? 1 : 0; }).join(""),
-        (d.artifacts || []).map(function (x) { return x ? 1 : 0; }).join(""), d.expDone || 0];
+        (d.artifacts || []).map(function (x) { return x ? 1 : 0; }).join(""), d.expDone || 0, d.planets || 0, d.pResets || 0];
     }
     if (data["wortraten-v1"]) {
       var w = JSON.parse(data["wortraten-v1"]);
@@ -4000,7 +4091,8 @@ var FigurenArt = (function () {
         research: String(i[7]).split("").map(Number), quallen: i[8], resets: i[9], boostUntil: 0, last: Date.now(),
         ach: String(i[10] || "").split("").map(Number), golds: Number(i[11]) || 0,
         perks: String(i[12] || "").split("").map(Number),
-        artifacts: String(i[13] || "").split("").map(Number), expDone: Number(i[14]) || 0
+        artifacts: String(i[13] || "").split("").map(Number), expDone: Number(i[14]) || 0,
+        planets: Number(i[15]) || 0, pResets: Number(i[16]) || 0
       });
     }
     if (c.w) {
