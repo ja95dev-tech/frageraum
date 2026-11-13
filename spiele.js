@@ -456,8 +456,8 @@
 ;
 // ===== quallenimperium.js =====
 // Spiel: Quallen-Imperium (Aufbauspiel unter Wasser)
-// Sammle Perlen, baue 16 Arten von Unterwasser-Fabriken, erforsche Verbesserungen, fange Goldene Perlen
-// und erweitere dein Imperium für einen dauerhaften Bonus. Der Fortschritt wird im Browser gespeichert
+// Sammle Perlen, baue 19 Arten von Unterwasser-Fabriken, erforsche Verbesserungen, fange Goldene Perlen,
+// schalte Erfolge frei (je +2 % Produktion, dauerhaft) und erweitere dein Imperium für einen dauerhaften Bonus. Der Fortschritt wird im Browser gespeichert
 // und läuft bis zu 8 Stunden weiter, auch wenn die Seite zu ist.
 (function () {
   "use strict";
@@ -485,7 +485,9 @@
     { icon: "🔱", name: "Atlantis-Tempel", makes: "Schätze", cost: 1.2e12, cps: 2e9 },
     { icon: "🌀", name: "Strudel-Reaktor", makes: "Strudelkraft", cost: 9e12, cps: 1.2e10 },
     { icon: "👑", name: "Quallen-Thronsaal", makes: "Quallengold", cost: 7e13, cps: 7.5e10 },
-    { icon: "🏭", name: "Chinesische-Kinderarbeit", makes: "Temu-ware", cost: 5e14, cps:9e11}
+    { icon: "🏭", name: "Chinesische-Kinderarbeit", makes: "Temu-ware", cost: 5e14, cps:9e11},
+    { icon: "🌌", name: "Tiefsee-Portal", makes: "Dimensionsperlen", cost: 4.5e15, cps: 8e12 },
+    { icon: "🪼", name: "Ur-Qualle", makes: "Ur-Energie", cost: 4e16, cps: 7.5e13 }
   ];
 
   // Jede Stufe verdoppelt den Ertrag pro Klick
@@ -497,7 +499,9 @@
     { cost: 2e7, name: "Tiefsee-Kran" },
     { cost: 5e8, name: "Strudelgriff" },
     { cost: 1e10, name: "Neptuns Dreizack" },
-    { cost: 3e11, name: "Quallen-Magie" }
+    { cost: 3e11, name: "Quallen-Magie" },
+    { cost: 1e13, name: "Ur-Greifer" },
+    { cost: 5e14, name: "Portal-Hände" }
   ];
 
   // Verbesserungen je Fabrik: verdoppeln den Ertrag dieser Fabrik
@@ -521,11 +525,38 @@
     { name: "Strudelmagie", cost: 1.5e12, bonus: 0.80 },
     { name: "Delfin-Post", cost: 2.5e13, bonus: 1.00 },
     { name: "Quallen-Weisheit", cost: 4e14, bonus: 1.50 },
-    { name: "Das Große Riff", cost: 7e15, bonus: 2.00 }
+    { name: "Das Große Riff", cost: 7e15, bonus: 2.00 },
+    { name: "Perlen-Syndikat", cost: 1.2e17, bonus: 3.00 },
+    { name: "Portal-Netzwerk", cost: 2e18, bonus: 4.00 },
+    { name: "Ur-Strömung", cost: 3.5e19, bonus: 6.00 }
   ];
 
   var STAGES = [[0, "Korallenlager"], [10, "Unterwasserdorf"], [30, "Riffstadt"], [70, "Tiefsee-Stadt"],
     [150, "Meeresmetropole"], [300, "Atlantis"], [600, "Quallen-Imperium"],[700, "Chinesische-Kinderarbeit"]];
+
+  // Erfolge: bleiben auch nach dem Imperium-Neustart erhalten, jeder gibt dauerhaft +2 % Produktion
+  var ACH_BONUS = 0.02;
+  var ACHIEVEMENTS = [
+    { name: "Erste Perlen", desc: "100 Klicks", check: function (s) { return s.clicks >= 100; } },
+    { name: "Fleißige Tentakel", desc: "1.000 Klicks", check: function (s) { return s.clicks >= 1000; } },
+    { name: "Klickmeister", desc: "10.000 Klicks", check: function (s) { return s.clicks >= 10000; } },
+    { name: "Kleines Vermögen", desc: "Insgesamt 10 Tsd. Perlen verdient", check: function (s) { return s.allTime >= 1e4; } },
+    { name: "Perlenbaron", desc: "Insgesamt 10 Mio. Perlen verdient", check: function (s) { return s.allTime >= 1e7; } },
+    { name: "Perlenkönig", desc: "Insgesamt 10 Mrd. Perlen verdient", check: function (s) { return s.allTime >= 1e10; } },
+    { name: "Perlengott", desc: "Insgesamt 10 Bio. Perlen verdient", check: function (s) { return s.allTime >= 1e13; } },
+    { name: "Unendliche Tiefe", desc: "Insgesamt 10 Brd. Perlen verdient", check: function (s) { return s.allTime >= 1e16; } },
+    { name: "Kleine Flotte", desc: "10 Fabriken gleichzeitig", check: function (s) { return buildingCount(s) >= 10; } },
+    { name: "Große Flotte", desc: "50 Fabriken gleichzeitig", check: function (s) { return buildingCount(s) >= 50; } },
+    { name: "Armada", desc: "150 Fabriken gleichzeitig", check: function (s) { return buildingCount(s) >= 150; } },
+    { name: "Ozeanherrscher", desc: "400 Fabriken gleichzeitig", check: function (s) { return buildingCount(s) >= 400; } },
+    { name: "Vielfalt", desc: "Von jeder Fabrik mindestens eine", check: function (s) { return s.owned.every(function (n) { return n >= 1; }); } },
+    { name: "Gelehrte Qualle", desc: "Alle Forschungen abgeschlossen", check: function (s) { return s.research.every(function (r) { return !!r; }); } },
+    { name: "Perlenfischer", desc: "10 Goldene Perlen gefangen", check: function (s) { return s.golds >= 10; } },
+    { name: "Goldrausch", desc: "50 Goldene Perlen gefangen", check: function (s) { return s.golds >= 50; } },
+    { name: "Neuanfang", desc: "Das Imperium zum ersten Mal erweitert", check: function (s) { return s.resets >= 1; } },
+    { name: "Dynastie", desc: "Das Imperium 5-mal erweitert", check: function (s) { return s.resets >= 5; } },
+    { name: "Quallenschwarm", desc: "10 Quallen besitzen", check: function (s) { return s.quallen >= 10; } }
+  ];
 
   var UNITS = [[1e24, "Quad."], [1e21, "Trd."], [1e18, "Tri."], [1e15, "Brd."], [1e12, "Bio."], [1e9, "Mrd."], [1e6, "Mio."], [1e3, "Tsd."]];
 
@@ -536,7 +567,8 @@
     return {
       coins: 0, total: 0, allTime: 0, clicks: 0,
       owned: zeros(BUILDINGS.length), mult: zeros(BUILDINGS.length), clickLevel: 0,
-      research: zeros(RESEARCH.length), quallen: 0, resets: 0, boostUntil: 0, last: Date.now()
+      research: zeros(RESEARCH.length), quallen: 0, resets: 0, boostUntil: 0, last: Date.now(),
+      ach: zeros(ACHIEVEMENTS.length), golds: 0
     };
   }
 
@@ -573,14 +605,26 @@
   function quallenFactor(s) { return 1 + PRESTIGE_BONUS * s.quallen; }
   function boostActive(s, now) { return now < s.boostUntil; }
 
+  function achCount(s) { return s.ach.reduce(function (a, b) { return a + (b ? 1 : 0); }, 0); }
+  function achFactor(s) { return 1 + ACH_BONUS * achCount(s); }
+
+  // Schaltet neu erreichte Erfolge frei und gibt deren Namen zurück
+  function checkAch(s) {
+    var fresh = [];
+    for (var i = 0; i < ACHIEVEMENTS.length; i++) {
+      if (!s.ach[i] && ACHIEVEMENTS[i].check(s)) { s.ach[i] = 1; fresh.push(ACHIEVEMENTS[i].name); }
+    }
+    return fresh;
+  }
+
   function multiplier(s, now) {
-    return (1 + researchBonus(s)) * quallenFactor(s) * (boostActive(s, now) ? BOOST_FACTOR : 1);
+    return (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) * (boostActive(s, now) ? BOOST_FACTOR : 1);
   }
 
   function cps(s, now) { return baseCps(s) * multiplier(s, now); }
 
   function clickValue(s, now) {
-    return Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) + cps(s, now) * 0.02;
+    return Math.pow(2, s.clickLevel) * (1 + researchBonus(s)) * quallenFactor(s) * achFactor(s) + cps(s, now) * 0.02;
   }
 
   // n: Zahl oder "max". Gibt die Anzahl der gebauten Fabriken zurück (0 = nichts gekauft).
@@ -654,13 +698,15 @@
   function prestige(s, now) {
     var g = prestigeGain(s);
     if (g < 1) return 0;
-    var keep = { quallen: s.quallen + g, resets: s.resets + 1, allTime: s.allTime, clicks: s.clicks };
+    var keep = { quallen: s.quallen + g, resets: s.resets + 1, allTime: s.allTime, clicks: s.clicks, ach: s.ach.slice(), golds: s.golds };
     var fresh = newState();
     Object.keys(fresh).forEach(function (k) { s[k] = fresh[k]; });
     s.quallen = keep.quallen;
     s.resets = keep.resets;
     s.allTime = keep.allTime;
     s.clicks = keep.clicks;
+    s.ach = keep.ach;
+    s.golds = keep.golds;
     s.last = now;
     return g;
   }
@@ -674,14 +720,25 @@
     return String(Math.floor(n));
   }
 
+  // Macht aus einem (evtl. fehlenden oder zu kurzen) Feld eine Liste der Länge n, mit Nullen aufgefüllt
+  function padTo(a, n) {
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(Array.isArray(a) && isFinite(a[i]) ? Number(a[i]) : 0);
+    return out;
+  }
+
   function load() {
     try {
       var v = JSON.parse(localStorage.getItem(SAVE_KEY));
-      if (v && Array.isArray(v.owned) && v.owned.length === BUILDINGS.length && isFinite(v.coins) && isFinite(v.total)) {
+      if (v && Array.isArray(v.owned) && v.owned.length >= 1 && v.owned.length <= BUILDINGS.length && isFinite(v.coins) && isFinite(v.total)) {
         var base = newState();
         Object.keys(base).forEach(function (k) { if (v[k] === undefined) v[k] = base[k]; });
-        if (!Array.isArray(v.mult) || v.mult.length !== BUILDINGS.length) v.mult = zeros(BUILDINGS.length);
-        if (!Array.isArray(v.research) || v.research.length !== RESEARCH.length) v.research = zeros(RESEARCH.length);
+        // Ältere Spielstände haben weniger Fabriken, Forschungen und Erfolge: auffüllen statt zurücksetzen
+        v.owned = padTo(v.owned, BUILDINGS.length);
+        v.mult = padTo(v.mult, BUILDINGS.length);
+        v.research = padTo(v.research, RESEARCH.length);
+        v.ach = padTo(v.ach, ACHIEVEMENTS.length);
+        if (!isFinite(v.golds)) v.golds = 0;
         if (!isFinite(v.allTime) || v.allTime < v.total) v.allTime = v.total;
         return v;
       }
@@ -756,7 +813,7 @@
     tabs.setAttribute("role", "group");
     tabs.setAttribute("aria-label", "Bereiche");
     var tabBtns = {};
-    [["fabriken", "Fabriken"], ["forschung", "Forschung"], ["imperium", "Imperium"]].forEach(function (t) {
+    [["fabriken", "Fabriken"], ["forschung", "Forschung"], ["erfolge", "Erfolge"], ["imperium", "Imperium"]].forEach(function (t) {
       var b = el("button", "chip", t[1]);
       b.type = "button";
       b.addEventListener("click", function () { b.blur(); tab = t[0]; showTab(); refresh(); });
@@ -827,6 +884,23 @@
     });
     panelR.appendChild(rList);
 
+    // --- Erfolge ---
+    var panelA = el("div");
+    var aInfo = el("p", "msg");
+    panelA.appendChild(aInfo);
+    var aList = el("ul", "shop");
+    var aRows = ACHIEVEMENTS.map(function (a) {
+      var li = el("li", "shop-row");
+      var info = el("div", "shop-info");
+      var title = el("strong", "", "");
+      info.appendChild(title);
+      info.appendChild(el("span", "msg", a.desc));
+      li.appendChild(info);
+      aList.appendChild(li);
+      return { title: title, name: a.name };
+    });
+    panelA.appendChild(aList);
+
     // --- Imperium ---
     var panelI = el("div");
     panelI.appendChild(el("p", "label", "Imperium erweitern"));
@@ -850,11 +924,13 @@
     box.appendChild(tabs);
     box.appendChild(panelF);
     box.appendChild(panelR);
+    box.appendChild(panelA);
     box.appendChild(panelI);
 
     function showTab() {
       panelF.hidden = tab !== "fabriken";
       panelR.hidden = tab !== "forschung";
+      panelA.hidden = tab !== "erfolge";
       panelI.hidden = tab !== "imperium";
       Object.keys(tabBtns).forEach(function (k) { tabBtns[k].setAttribute("aria-pressed", String(k === tab)); });
     }
@@ -927,6 +1003,12 @@
           if (s.research[i]) { b.textContent = "✓ erforscht"; b.disabled = true; }
           else { b.textContent = "Erforschen (" + fmt(r.cost) + ")"; b.disabled = s.coins < r.cost; }
         });
+      } else if (tab === "erfolge") {
+        aInfo.textContent = achCount(s) + " von " + ACHIEVEMENTS.length + " Erfolgen · jeder gibt dauerhaft +" + Math.round(ACH_BONUS * 100) +
+          " % Produktion (jetzt +" + Math.round(ACH_BONUS * achCount(s) * 100) + " %). Erfolge bleiben auch nach einer Imperium-Erweiterung erhalten.";
+        aRows.forEach(function (r, i) {
+          r.title.textContent = (s.ach[i] ? "🏆 " : "🔒 ") + r.name;
+        });
       } else {
         var g = prestigeGain(s);
         pInfo.textContent = "Wenn du dein Imperium erweiterst, verlierst du alle Perlen, Fabriken und Forschungen. Dafür bekommst du Quallen: Jede Qualle gibt dauerhaft +" +
@@ -937,7 +1019,9 @@
           "Insgesamt verdient: " + fmt(s.allTime) + " Perlen",
           "Klicks: " + fmt(s.clicks),
           "Imperium-Erweiterungen: " + s.resets,
-          "Quallen: " + s.quallen
+          "Quallen: " + s.quallen,
+          "Erfolge: " + achCount(s) + " von " + ACHIEVEMENTS.length,
+          "Goldene Perlen gefangen: " + s.golds
         ];
         statsList.textContent = "";
         lines.forEach(function (l) { statsList.appendChild(el("li", "", l)); });
@@ -979,6 +1063,7 @@
       var now = Date.now();
       gold.hidden = true;
       nextGold = now + 45000 + Math.random() * 65000;
+      s.golds++;
       if (Math.random() < 0.6) {
         var amount = Math.max(50, cps(s, now) * 120);
         gain(s, amount);
@@ -995,6 +1080,8 @@
       var now = Date.now();
       earn(s, Math.min((now - lastTick) / 1000, MAX_OFFLINE), now);
       lastTick = now;
+      var fresh = checkAch(s);
+      if (fresh.length) note.textContent = "🏆 Erfolg freigeschaltet: " + fresh.join(", ") + " (+" + Math.round(ACH_BONUS * fresh.length * 100) + " % Produktion)";
       if (now - lastSave > 3000) { save(s); lastSave = now; }
       if (!gold.hidden && now > goldHideAt) { gold.hidden = true; nextGold = now + 45000 + Math.random() * 65000; }
       if (gold.hidden && now >= nextGold) {
@@ -1021,6 +1108,7 @@
     start: start,
     _engine: {
       BUILDINGS: BUILDINGS, RESEARCH: RESEARCH, CLICK_UPGRADES: CLICK_UPGRADES, MULT_RULES: MULT_RULES,
+      ACHIEVEMENTS: ACHIEVEMENTS, checkAch: checkAch, achCount: achCount, achFactor: achFactor, padTo: padTo,
       newState: newState, cost: cost, costN: costN, maxAffordable: maxAffordable, buy: buy, cps: cps, baseCps: baseCps,
       clickValue: clickValue, upgradeBuilding: upgradeBuilding, canUpgrade: canUpgrade, upgradePrice: upgradePrice,
       upgradeClick: upgradeClick, buyResearch: buyResearch, earn: earn, gain: gain, prestigeGain: prestigeGain, prestige: prestige,
@@ -3531,7 +3619,8 @@ var FigurenArt = (function () {
     if (data["quallenimperium-v1"]) {
       var d = JSON.parse(data["quallenimperium-v1"]);
       c.i = [Math.floor(d.coins), Math.floor(d.total), Math.floor(d.allTime || d.total), d.clicks || 0, d.owned, d.mult,
-        d.clickLevel || 0, (d.research || []).map(function (x) { return x ? 1 : 0; }).join(""), d.quallen || 0, d.resets || 0];
+        d.clickLevel || 0, (d.research || []).map(function (x) { return x ? 1 : 0; }).join(""), d.quallen || 0, d.resets || 0,
+        (d.ach || []).map(function (x) { return x ? 1 : 0; }).join(""), d.golds || 0];
     }
     if (data["wortraten-v1"]) {
       var w = JSON.parse(data["wortraten-v1"]);
@@ -3552,7 +3641,8 @@ var FigurenArt = (function () {
       var i = c.i;
       data["quallenimperium-v1"] = JSON.stringify({
         coins: i[0], total: i[1], allTime: i[2], clicks: i[3], owned: i[4], mult: i[5], clickLevel: i[6],
-        research: String(i[7]).split("").map(Number), quallen: i[8], resets: i[9], boostUntil: 0, last: Date.now()
+        research: String(i[7]).split("").map(Number), quallen: i[8], resets: i[9], boostUntil: 0, last: Date.now(),
+        ach: String(i[10] || "").split("").map(Number), golds: Number(i[11]) || 0
       });
     }
     if (c.w) {
