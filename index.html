@@ -11,53 +11,105 @@
 <main>
 
   <!-- Ansicht 1: Passwort -->
-  <section id="login" aria-labelledby="login-title">
-    <h1 id="login-title">Geschützter Bereich</h1>
-    <p class="lead">Gib das Passwort ein, um Fragen an die KI zu stellen und Spiele zu spielen.</p>
-    <form id="login-form">
-      <label for="pw">Passwort</label>
-      <input id="pw" type="password" autocomplete="current-password" required>
-      <div class="row">
-        <button id="login-btn" type="submit">Entsperren</button>
-        <p id="login-msg" class="msg" role="status"></p>
-      </div>
-    </form>
+  <section id="login" class="gate" aria-labelledby="login-title">
+    <span class="bub" aria-hidden="true" style="left:8%;width:.7rem;height:.7rem;animation-duration:9s;animation-delay:-2s"></span>
+    <span class="bub" aria-hidden="true" style="left:24%;width:1.1rem;height:1.1rem;animation-duration:12s;animation-delay:-7s"></span>
+    <span class="bub" aria-hidden="true" style="left:61%;width:.5rem;height:.5rem;animation-duration:8s;animation-delay:-4s"></span>
+    <span class="bub" aria-hidden="true" style="left:78%;width:.9rem;height:.9rem;animation-duration:11s;animation-delay:-1s"></span>
+    <span class="bub" aria-hidden="true" style="left:90%;width:.6rem;height:.6rem;animation-duration:10s;animation-delay:-6s"></span>
+    <div class="gate-in">
+      <span class="pearl" aria-hidden="true"></span>
+      <h1 id="login-title">Fragenraum</h1>
+      <p class="lead">Ein geschützter Platz für Fragen an die KI, kleine Spiele und ein Imperium unter Wasser. Gib das Passwort ein, um einzutreten.</p>
+      <form id="login-form">
+        <label for="pw">Passwort</label>
+        <input id="pw" type="password" autocomplete="current-password" required>
+        <div class="row">
+          <button id="login-btn" type="submit">Eintreten</button>
+          <p id="login-msg" class="msg" role="status"></p>
+        </div>
+      </form>
+    </div>
   </section>
 
   <!-- Ansicht 2: Bereich nach dem Login -->
-  <section id="ask" hidden>
-    <div class="topbar">
-      <nav class="tabs" aria-label="Bereiche">
-        <button type="button" class="tab" data-tab="fragen" aria-selected="true">Fragen</button>
-        <button type="button" class="tab" data-tab="spiele" aria-selected="false">Spiele</button>
-        <button type="button" class="tab" data-tab="spielstand" aria-selected="false">Spielstand</button>
-        <button type="button" class="tab" data-tab="uhr" aria-selected="false">Uhr</button>
-        <button type="button" class="tab" data-tab="farbe" aria-selected="false">Farbe</button>
-      </nav>
+  <section id="app" hidden>
+    <header class="site-head">
+      <p class="wordmark"><span class="pearl sm" aria-hidden="true"></span>Fragenraum</p>
       <button id="logout-btn" class="link" type="button">Abmelden</button>
+    </header>
+    <nav class="tabs" aria-label="Bereiche">
+      <button type="button" class="tab" data-tab="start" aria-selected="true">Start</button>
+      <button type="button" class="tab" data-tab="fragen" aria-selected="false">Fragen</button>
+      <button type="button" class="tab" data-tab="spiele" aria-selected="false">Spiele</button>
+      <button type="button" class="tab" data-tab="spielstand" aria-selected="false">Spielstand</button>
+      <button type="button" class="tab" data-tab="uhr" aria-selected="false">Uhr</button>
+      <button type="button" class="tab" data-tab="farbe" aria-selected="false">Farbe</button>
+    </nav>
+
+    <!-- Start -->
+    <div id="panel-start">
+      <section id="hero" class="hero" aria-labelledby="hero-title">
+        <div class="hero-text">
+          <h1 id="hero-title"></h1>
+          <p id="hero-date" class="hero-date"></p>
+          <p id="hero-depth" class="hero-depth"></p>
+          <p id="hero-zone" class="hero-zone"></p>
+          <button id="hero-go" class="hero-btn" type="button"></button>
+        </div>
+        <div id="gauge" class="gauge" aria-hidden="true"></div>
+      </section>
+
+      <h2 class="sec-h">Fakt des Tages</h2>
+      <p id="fact" class="fact"></p>
+
+      <h2 class="sec-h">Tipp des Tages</h2>
+      <p id="tip" class="tip"></p>
+
+      <h2 class="sec-h">Deine Spiele</h2>
+      <ul id="game-table" class="gtable"></ul>
     </div>
 
-    <div id="panel-fragen">
+    <!-- Fragen -->
+    <div id="panel-fragen" hidden>
       <h1 id="ask-title">Was möchtest du wissen?</h1>
       <p class="lead">Schreibe deine Frage so genau wie möglich. Die Antwort kommt von Gemini.</p>
+      <p class="hint">Noch keine Idee? Tippe auf einen Vorschlag.</p>
+      <div id="suggest" class="chips" role="group" aria-label="Fragevorschläge"></div>
+      <button id="suggest-more" class="link" type="button">Andere Vorschläge zeigen</button>
       <form id="ask-form">
         <label for="q">Deine Frage</label>
         <textarea id="q" maxlength="4000" required></textarea>
+        <div class="qmeta">
+          <span id="q-count">0 von 4000 Zeichen</span>
+          <span>Mit Strg+Enter sendest du die Frage ab.</span>
+        </div>
         <div class="row">
           <button id="ask-btn" type="submit">Frage stellen</button>
           <p id="ask-msg" class="msg" role="status"></p>
         </div>
       </form>
       <div id="answer" class="answer" hidden>
-        <h2>Antwort von Gemini</h2>
-        <p id="answer-text"></p>
+        <div class="answer-head">
+          <h2>Antwort von Gemini</h2>
+          <button id="copy-btn" class="link" type="button">Antwort kopieren</button>
+        </div>
+        <div id="answer-text" class="md"></div>
       </div>
+      <section id="history-box" hidden>
+        <h2 class="sec-h">Zuletzt gefragt</h2>
+        <p class="hint">Der Verlauf liegt nur in diesem Browser. Tippe auf eine Frage, um die Antwort wieder zu öffnen.</p>
+        <ul id="history" class="hist"></ul>
+        <button id="history-clear" class="link" type="button">Verlauf löschen</button>
+      </section>
     </div>
 
+    <!-- Spiele -->
     <div id="panel-spiele" hidden>
       <h1>Spiele</h1>
       <p class="lead">Kleine Spiele für zwischendurch. Wähle eins aus.</p>
       <div id="game-list" class="chips" role="group" aria-label="Spiele"></div>
+      <p id="game-desc" class="game-desc"></p>
       <p id="games-msg" class="msg" role="status"></p>
       <div id="game-stage"></div>
     </div>
@@ -73,16 +125,20 @@
       <div id="tool-uhr"></div>
     </div>
 
+    <!-- Farbe -->
     <div id="panel-farbe" hidden>
       <h1>Aussehen</h1>
-      <p class="lead">Wähle eine oder mehrere Farben. Bei mehreren Farben entsteht ein Farbverlauf auf der ganzen Seite. Die Zahl zeigt die Reihenfolge im Verlauf. Die Einstellung wird in diesem Browser gespeichert.</p>
-      <p class="label">Farben (bis zu 5)</p>
+      <p class="lead">Wähle ein Farbthema oder mische bis zu fünf eigene Farben. Bei mehreren Farben entsteht ein Farbverlauf auf der ganzen Seite. Die Einstellung wird in diesem Browser gespeichert.</p>
+      <p class="label">Farbthemen</p>
+      <div id="palettes" class="chips" role="group" aria-label="Farbthemen"></div>
+      <p class="label">Eigene Farben (bis zu 5)</p>
+      <p class="hint">Die Zahl zeigt die Reihenfolge im Verlauf.</p>
       <div id="swatches" class="swatches" role="group" aria-label="Farben"></div>
       <div id="gradient-preview" class="gradient-preview" role="img" aria-label="Vorschau der gewählten Farben"></div>
       <p id="gradient-text" class="msg" role="status"></p>
       <div class="row">
         <label for="custom-color" class="inline">Eigene Farbe</label>
-        <input id="custom-color" type="color" value="#2447d6">
+        <input id="custom-color" type="color" value="#0b7a86">
         <button id="color-add" class="link" type="button">Hinzufügen</button>
         <button id="color-reset" class="link" type="button">Zurücksetzen</button>
       </div>

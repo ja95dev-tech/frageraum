@@ -3855,7 +3855,33 @@ var FigurenArt = (function () {
   }
 
   var SVGNS = "http://www.w3.org/2000/svg", XLINK = "http://www.w3.org/1999/xlink";
+  var FIG_KEY = "schach-figuren";
+  var GLYPH = { K: "\u265A", Q: "\u265B", R: "\u265C", B: "\u265D", N: "\u265E", P: "\u265F" };
+  var figStyle = (function () {
+    try { return localStorage.getItem(FIG_KEY) === "klassisch" ? "klassisch" : "art"; } catch (e) { return "art"; }
+  })();
+
   function pieceSvg(p) {
+    if (figStyle === "klassisch") {
+      var white = isWhite(p);
+      var sv = document.createElementNS(SVGNS, "svg");
+      sv.setAttribute("viewBox", "0 0 100 100");
+      sv.setAttribute("aria-hidden", "true");
+      var t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("x", "50");
+      t.setAttribute("y", "78");
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-size", "88");
+      t.setAttribute("font-family", "'Segoe UI Symbol','Noto Sans Symbols 2','DejaVu Sans','Apple Symbols',serif");
+      t.setAttribute("fill", white ? "#ffffff" : "#15181d");
+      t.setAttribute("stroke", white ? "#15181d" : "#ffffff");
+      t.setAttribute("stroke-width", white ? "3.5" : "2");
+      t.setAttribute("stroke-linejoin", "round");
+      t.setAttribute("paint-order", "stroke fill");
+      t.textContent = GLYPH[p.toUpperCase()] + "\uFE0E";
+      sv.appendChild(t);
+      return sv;
+    }
     var id = "#qs-" + (isWhite(p) ? "w" : "b") + p.toUpperCase();
     var svg = document.createElementNS(SVGNS, "svg");
     svg.setAttribute("viewBox", "0 0 100 100");
@@ -3873,9 +3899,13 @@ var FigurenArt = (function () {
     ".sch-elo{max-width:26rem;margin:0 0 1rem}" +
     ".sch-elo label{display:block;margin:0 0 0.3rem;font-weight:600}" +
     ".sch-elo input[type=range]{width:100%;padding:0;accent-color:var(--accent);background:transparent;border:0}" +
-    ".sch-online{max-width:26rem;margin:0 0 1rem}.sch-online .row{margin-top:0.5rem}" +
-    ".sch-online input{width:8rem;text-transform:uppercase;letter-spacing:0.12em}" +
-    ".sch-code{font-family:var(--serif);font-size:2.2rem;letter-spacing:0.18em;margin:0.5rem 0 0;min-height:2.4rem}";
+    ".sch-lobby{max-width:30rem;margin:0 0 1rem}" +
+    ".sch-lobby p{margin:0 0 0.8rem}" +
+    ".sch-lobby .row{margin:0.4rem 0 1rem;align-items:center}" +
+    ".sch-lobby input[type=text]{width:9rem;font:600 1.4rem/1.2 var(--serif,Georgia,serif);letter-spacing:0.25em;text-transform:uppercase;text-align:center}" +
+    ".sch-bar{margin:0 0 0.8rem}" +
+    ".sch-code{display:inline-block;font:700 1.9rem/1.2 var(--serif,Georgia,serif);letter-spacing:0.3em;padding:0.1em 0.35em 0.1em 0.5em;border:2px dashed var(--accent);border-radius:0.5rem;margin:0.2rem 0.8rem 0.4rem 0}" +
+    ".sch-bar .row{margin:0.4rem 0 0}";
 
   // ---------- Oberfläche ----------
   function sqName(sq) { return FILES[sq & 7] + (8 - (sq >> 3)); }
@@ -3917,22 +3947,32 @@ var FigurenArt = (function () {
       sp.innerHTML = FigurenArt.sprite();
       document.body.appendChild(sp);
     }
-    var mode = "w";      // "w": du spielst Weiß, "b": du spielst Schwarz, "2": zwei Spieler
+    var OKEY = "schach-online";
+    var mode = loadNet() ? "online" : "w";      // "w": du spielst Weiß, "b": du spielst Schwarz, "2": zwei Spieler, "online": gegen ein anderes Gerät
     var elo = loadElo();
     var state, keys, stack, last, sel, targets, cur, thinking, timer, stopped = false;
-    var net = { peer: null, conn: null, open: false, color: "w", gen: 0, t: 0, asked: false };
+    var played = [], net = null, pollT = null, sending = false, desync = false, overSent = false, onlineColor = "r";
 
     var markMode = chipRow(box, "Spielmodus",
-      [["w", "Als Weiß gegen Computer"], ["b", "Als Schwarz gegen Computer"], ["2", "Zwei Spieler"], ["o", "Online"]],
+      [["w", "Als Weiß gegen Computer"], ["b", "Als Schwarz gegen Computer"], ["2", "Zwei Spieler"], ["online", "Online mit Code"]],
       function (id) {
-        if (id === "o" && mode === "o") return;
-        if (mode === "o") closeNet();
-        mode = id; markMode(mode);
-        eloBox.hidden = mode === "2" || mode === "o";
-        onlineBox.hidden = mode !== "o";
-        undoBtn.hidden = mode === "o";
-        newGame();
+        leaveOnlineView();
+        mode = id;
+        markMode(mode);
+        eloBox.hidden = mode === "2" || mode === "online";
+        if (mode === "online") enterOnline(); else newGame();
       });
+
+    var markFig = chipRow(box, "Aussehen der Figuren",
+      [["art", "Figuren: Quallen-Stil"], ["klassisch", "Figuren: Klassisch"]],
+      function (id) {
+        figStyle = id;
+        try { localStorage.setItem(FIG_KEY, id); } catch (e) {}
+        markFig(id);
+        for (var i = 0; i < cells.length; i++) cells[i].dataset.p = "#";   // erzwingt neu zeichnen
+        if (state && (mode !== "online" || net)) render();
+      });
+    markFig(figStyle);
 
     var eloBox = document.createElement("div");
     eloBox.className = "sch-elo";
@@ -3951,43 +3991,6 @@ var FigurenArt = (function () {
     eloBox.appendChild(eloText);
     eloBox.appendChild(eloInput);
     box.appendChild(eloBox);
-
-    var onlineBox = document.createElement("div");
-    onlineBox.className = "sch-online";
-    onlineBox.hidden = true;
-    var hostBtn = document.createElement("button");
-    hostBtn.type = "button";
-    hostBtn.textContent = "Spiel erstellen";
-    var joinLabel = document.createElement("label");
-    joinLabel.htmlFor = "sch-join-in";
-    joinLabel.textContent = "Oder mit Code beitreten";
-    joinLabel.style.marginTop = "1rem";
-    var joinInput = document.createElement("input");
-    joinInput.id = "sch-join-in";
-    joinInput.type = "text";
-    joinInput.maxLength = 6;
-    joinInput.autocomplete = "off";
-    joinInput.setAttribute("autocapitalize", "characters");
-    var joinBtn = document.createElement("button");
-    joinBtn.type = "button";
-    joinBtn.textContent = "Beitreten";
-    var leaveBtn = document.createElement("button");
-    leaveBtn.type = "button";
-    leaveBtn.className = "link";
-    leaveBtn.textContent = "Trennen";
-    var onCode = document.createElement("p");
-    onCode.className = "sch-code";
-    var onMsg = document.createElement("p");
-    onMsg.className = "msg";
-    onMsg.setAttribute("aria-live", "polite");
-    var r1 = document.createElement("div"); r1.className = "row"; r1.appendChild(hostBtn); r1.appendChild(leaveBtn);
-    var r2 = document.createElement("div"); r2.className = "row"; r2.appendChild(joinInput); r2.appendChild(joinBtn);
-    [r1, onCode, joinLabel, r2, onMsg].forEach(function (x) { onlineBox.appendChild(x); });
-    box.appendChild(onlineBox);
-    hostBtn.addEventListener("click", hostGame);
-    joinBtn.addEventListener("click", joinGame);
-    leaveBtn.addEventListener("click", function () { closeNet(); setOnline("Getrennt.", false); render(); });
-    joinInput.addEventListener("keydown", function (e) { if (e.key === "Enter") joinGame(); });
 
     var board = document.createElement("div");
     board.className = "board";
@@ -4013,7 +4016,7 @@ var FigurenArt = (function () {
     var newBtn = document.createElement("button");
     newBtn.type = "button";
     newBtn.textContent = "Neues Spiel";
-    newBtn.addEventListener("click", onNewClick);
+    newBtn.addEventListener("click", newGame);
     var undoBtn = document.createElement("button");
     undoBtn.type = "button";
     undoBtn.className = "link";
@@ -4023,194 +4026,12 @@ var FigurenArt = (function () {
     row.appendChild(undoBtn);
     box.appendChild(row);
 
-
-    // ---------- Online (PeerJS, direkte Verbindung, keine Datenbank) ----------
-    var ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    var PEER_URL = "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js";
-    var PREFIX = "fragenraum-schach-";
-
-    function newCode() {
-      var a = new Uint8Array(6), s = "", i;
-      (window.crypto || window.msCrypto).getRandomValues(a);
-      for (i = 0; i < 6; i++) s += ALPHA.charAt(a[i] % ALPHA.length);
-      return s;
-    }
-
-    function loadPeerJs() {
-      return new Promise(function (resolve, reject) {
-        if (window.Peer) { resolve(); return; }
-        var s = document.createElement("script");
-        s.src = PEER_URL;
-        s.onload = function () { window.Peer ? resolve() : reject(new Error("peerjs")); };
-        s.onerror = function () { reject(new Error("peerjs")); };
-        document.head.appendChild(s);
-      });
-    }
-
-    function setOnline(text, isError) {
-      onMsg.textContent = text || "";
-      onMsg.className = "msg" + (isError ? " error" : "");
-    }
-
-    function closeNet() {
-      net.gen++;
-      clearTimeout(net.t);
-      try { if (net.conn) net.conn.close(); } catch (e) {}
-      try { if (net.peer) net.peer.destroy(); } catch (e) {}
-      net.peer = null; net.conn = null; net.open = false; net.color = "w"; net.asked = false;
-      onCode.textContent = "";
-    }
-
-    function netError(err) {
-      var t = err && err.type, msg;
-      if (t === "peer-unavailable") msg = "Dieser Code wurde nicht gefunden. Prüfe den Code. Der Mitspieler muss zuerst ein Spiel erstellen.";
-      else if (t === "network" || t === "server-error" || t === "socket-error" || t === "socket-closed") msg = "Keine Verbindung zum Vermittlungsserver (PeerJS). Versuche es später noch einmal.";
-      else msg = "Verbindungsfehler" + (t ? " (" + t + ")" : "") + ". Versuche es noch einmal.";
-      closeNet();
-      setOnline(msg, true);
-      render();
-    }
-
-    function send(obj) {
-      if (!net.conn || !net.open) return;
-      try { net.conn.send(JSON.stringify(obj)); } catch (e) {}
-    }
-
-    function colorName(c) { return c === "w" ? "Weiß (orange)" : "Schwarz"; }
-
-    function setupConn(g, conn, color) {
-      conn.on("open", function () {
-        if (g !== net.gen || net.conn !== conn) return;
-        clearTimeout(net.t);
-        net.open = true;
-        net.color = color;
-        onCode.textContent = "";
-        setOnline("Verbunden. Du spielst " + colorName(color) + ".", false);
-        newGame();
-      });
-      conn.on("data", function (d) { if (g === net.gen && net.conn === conn) onNet(d); });
-      function lost() {
-        if (g !== net.gen || net.conn !== conn) return;
-        net.open = false;
-        setOnline("Die Verbindung zum Mitspieler wurde getrennt.", true);
-        render();
-      }
-      conn.on("close", lost);
-      conn.on("error", lost);
-    }
-
-    function hostGame() {
-      closeNet();
-      var g = net.gen;
-      setOnline("Verbinde mit dem Vermittlungsserver …", false);
-      loadPeerJs().then(function () { if (g === net.gen) tryHost(g, 0); }, function () {
-        if (g === net.gen) setOnline("PeerJS konnte nicht geladen werden. Prüfe die Internetverbindung.", true);
-      });
-    }
-
-    function tryHost(g, n) {
-      var code = newCode();
-      var peer = new window.Peer(PREFIX + code);
-      net.peer = peer;
-      function live() { return g === net.gen && net.peer === peer; }
-      peer.on("open", function () {
-        if (!live()) return;
-        onCode.textContent = code;
-        setOnline("Gib diesen Code deinem Mitspieler. Warte auf den Mitspieler …", false);
-      });
-      peer.on("connection", function (conn) {
-        if (!live()) return;
-        if (net.conn) { conn.on("open", function () { try { conn.close(); } catch (e) {} }); return; }
-        net.conn = conn;
-        setupConn(g, conn, "w");
-      });
-      peer.on("error", function (err) {
-        if (!live()) return;
-        if (err && err.type === "unavailable-id" && n < 4) {
-          net.peer = null;
-          try { peer.destroy(); } catch (e) {}
-          tryHost(g, n + 1);
-          return;
-        }
-        netError(err);
-      });
-    }
-
-    function joinGame() {
-      var code = joinInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (code.length !== 6) { setOnline("Der Code hat 6 Zeichen.", true); return; }
-      closeNet();
-      var g = net.gen;
-      setOnline("Verbinde …", false);
-      loadPeerJs().then(function () {
-        if (g !== net.gen) return;
-        var peer = new window.Peer();
-        net.peer = peer;
-        function live() { return g === net.gen && net.peer === peer; }
-        peer.on("open", function () {
-          if (!live()) return;
-          var conn = peer.connect(PREFIX + code, { reliable: true });
-          net.conn = conn;
-          setupConn(g, conn, "b");
-          net.t = setTimeout(function () {
-            if (live() && !net.open) netError({ type: "peer-unavailable" });
-          }, 20000);
-        });
-        peer.on("error", function (err) { if (live()) netError(err); });
-      }, function () {
-        if (g === net.gen) setOnline("PeerJS konnte nicht geladen werden. Prüfe die Internetverbindung.", true);
-      });
-    }
-
-    function matchMove(from, to) {
-      var c = cur.moves.filter(function (m) { return m.from === from && m.to === to; });
-      return c.filter(function (x) { return !x.promo || x.promo === "q"; })[0] || null;
-    }
-
-    function swapAndNew() {
-      net.color = net.color === "w" ? "b" : "w";
-      setOnline("Neues Spiel. Du spielst " + colorName(net.color) + ".", false);
-      newGame();
-    }
-
-    function onNet(raw) {
-      var d;
-      try { d = JSON.parse(String(raw)); } catch (e) { return; }
-      if (!d || typeof d !== "object") return;
-      if (d.t === "move") {
-        if (mode !== "o" || !net.open || cur.over || state.turn === net.color) return;
-        var m = d.n === stack.length ? matchMove(d.from, d.to) : null;
-        if (!m) { setOnline("Die Stellungen stimmen nicht mehr überein. Starte ein neues Spiel.", true); return; }
-        apply(m, true);
-      } else if (d.t === "new") {
-        if (mode !== "o") return;
-        if (window.confirm("Dein Mitspieler möchte ein neues Spiel (die Farben werden getauscht). Einverstanden?")) {
-          send({ t: "newok" });
-          swapAndNew();
-        } else send({ t: "newno" });
-      } else if (d.t === "newok") {
-        if (net.asked) { net.asked = false; swapAndNew(); }
-      } else if (d.t === "newno") {
-        net.asked = false;
-        setOnline("Dein Mitspieler möchte kein neues Spiel.", false);
-      }
-    }
-
-    function onNewClick() {
-      if (mode !== "o") { newGame(); return; }
-      if (!net.open) return;
-      net.asked = true;
-      send({ t: "new" });
-      setOnline("Anfrage für ein neues Spiel gesendet …", false);
-    }
-
-    function opponentTurn() { return mode === "o" && (!net.open || state.turn !== net.color); }
-
     function humanColor() { return mode === "b" ? "b" : "w"; }
-    function computerTurn() { return mode !== "2" && mode !== "o" && state.turn !== humanColor(); }
+    function computerTurn() { return mode !== "2" && mode !== "online" && state.turn !== humanColor(); }
     function say(t) { info.textContent = t; }
 
     function statusText() {
+      if (mode === "online") return onlineStatus();
       var who = state.turn === "w" ? "Weiß (orange)" : "Schwarz";
       if (cur.over) {
         if (cur.result === "matt") return "Schachmatt! " + (state.turn === "w" ? "Schwarz" : "Weiß") + " gewinnt.";
@@ -4220,13 +4041,12 @@ var FigurenArt = (function () {
         return "Remis (dreimal dieselbe Stellung).";
       }
       if (thinking) return "Computer denkt nach …";
-      if (mode === "o" && !net.open) return "Noch keine Verbindung zu einem Mitspieler.";
-      var who2 = mode === "2" ? who + " ist am Zug" : mode === "o" ? (state.turn === net.color ? "Du bist am Zug" : "Mitspieler ist am Zug") : (computerTurn() ? "Computer ist am Zug" : "Du bist am Zug");
+      var who2 = mode === "2" ? who + " ist am Zug" : (computerTurn() ? "Computer ist am Zug" : "Du bist am Zug");
       return who2 + (cur.check ? ": Schach!" : ".");
     }
 
     function render() {
-      var flip = mode === "b" || (mode === "o" && net.color === "b");
+      var flip = mode === "b" || (mode === "online" && !!net && net.you === "b");
       for (var i = 0; i < 64; i++) {
         var sq = flip ? 63 - i : i;
         var p = state.b[sq], r = sq >> 3, f = sq & 7, c = cells[i];
@@ -4245,6 +4065,7 @@ var FigurenArt = (function () {
         c.setAttribute("aria-label", sqName(sq) + (p ? ", " + pieceName(p) : ", leer"));
       }
       say(statusText());
+      if (mode === "online") renderBar();
     }
 
     function afterMove() {
@@ -4256,14 +4077,20 @@ var FigurenArt = (function () {
       if (thinking) timer = setTimeout(computerMove, 60);
     }
 
-    function apply(m, remote) {
-      var n = stack.length;
+    function moveStr(m) { return sqName(m.from) + sqName(m.to) + (m.promo || ""); }
+
+    function step(m) {
       stack.push({ s: state, k: keys.length, last: last });
       state = make(state, m);
       keys.push(keyOf(state));
+      played.push(moveStr(m));
       last = { from: m.from, to: m.to };
-      if (mode === "o" && !remote) send({ t: "move", n: n, from: m.from, to: m.to });
+    }
+
+    function apply(m) {
+      step(m);
       afterMove();
+      if (mode === "online") sendMove(played.length - 1, played[played.length - 1]);
     }
 
     function computerMove() {
@@ -4286,7 +4113,8 @@ var FigurenArt = (function () {
     }
 
     function onSquare(sq) {
-      if (thinking || cur.over || computerTurn() || opponentTurn()) return;
+      if (thinking || cur.over || computerTurn()) return;
+      if (mode === "online" && (!net || net.players < 2 || net.st !== "play" || state.turn !== net.you || sending)) return;
       var p = state.b[sq];
       if (sel >= 0 && targets.indexOf(sq) >= 0) {
         var cands = cur.moves.filter(function (m) { return m.from === sel && m.to === sq; });
@@ -4305,7 +4133,7 @@ var FigurenArt = (function () {
     }
 
     function undo() {
-      if (thinking || mode === "o") return;
+      if (thinking) return;
       var min = (mode === "b") ? 1 : 0;   // der erste Computerzug bleibt stehen
       if (stack.length <= min) return;
       do {
@@ -4320,23 +4148,369 @@ var FigurenArt = (function () {
       state = fromFEN(START);
       keys = [keyOf(state)];
       stack = [];
+      played = [];
       last = null;
       sel = -1;
       targets = [];
       afterMove();
     }
 
-    function recolor() { render(); }
+    // ---------- Online (zwei Geräte, verbunden über einen Code) ----------
+    function loadNet() {
+      try {
+        var v = JSON.parse(localStorage.getItem(OKEY));
+        if (v && typeof v.code === "string" && typeof v.token === "string" && (v.you === "w" || v.you === "b")) return v;
+      } catch (e) {}
+      return null;
+    }
+
+    function saveNet() {
+      try {
+        if (net && net.st !== "end") localStorage.setItem(OKEY, JSON.stringify({ code: net.code, token: net.token, you: net.you }));
+        else localStorage.removeItem(OKEY);
+      } catch (e) {}
+    }
+
+    function post(path, body) {
+      return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (d) { d.ok = r.ok; d.http = r.status; return d; });
+        });
+    }
+
+    var lobby = document.createElement("div");
+    lobby.className = "sch-lobby";
+    lobby.hidden = true;
+    var lobbyIntro = document.createElement("p");
+    lobbyIntro.textContent = "Spiele gegen jemanden auf einem anderen Gerät. Eine Person erstellt eine Partie und schickt den Code. Die andere Person gibt den Code ein.";
+    lobby.appendChild(lobbyIntro);
+    var markOnlineColor = chipRow(lobby, "Meine Farbe",
+      [["r", "Farbe zufällig"], ["w", "Ich bin Weiß"], ["b", "Ich bin Schwarz"]],
+      function (id) { onlineColor = id; markOnlineColor(id); });
+    markOnlineColor(onlineColor);
+    var createRow = document.createElement("div");
+    createRow.className = "row";
+    var createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.textContent = "Partie erstellen";
+    createRow.appendChild(createBtn);
+    lobby.appendChild(createRow);
+    var joinLabel = document.createElement("label");
+    joinLabel.htmlFor = "sch-code-in";
+    joinLabel.textContent = "Oder Code von deinem Gegner eingeben";
+    lobby.appendChild(joinLabel);
+    var joinRow = document.createElement("div");
+    joinRow.className = "row";
+    var codeIn = document.createElement("input");
+    codeIn.type = "text";
+    codeIn.id = "sch-code-in";
+    codeIn.maxLength = 5;
+    codeIn.autocomplete = "off";
+    codeIn.setAttribute("autocapitalize", "characters");
+    codeIn.setAttribute("spellcheck", "false");
+    var joinBtn = document.createElement("button");
+    joinBtn.type = "button";
+    joinBtn.textContent = "Beitreten";
+    joinRow.appendChild(codeIn);
+    joinRow.appendChild(joinBtn);
+    lobby.appendChild(joinRow);
+    var lobbyMsg = document.createElement("p");
+    lobbyMsg.className = "msg";
+    lobbyMsg.setAttribute("role", "status");
+    lobby.appendChild(lobbyMsg);
+    box.insertBefore(lobby, board);
+
+    var bar = document.createElement("div");
+    bar.className = "sch-bar";
+    bar.hidden = true;
+    var codeShow = document.createElement("span");
+    codeShow.className = "sch-code";
+    var colorText = document.createElement("p");
+    colorText.className = "msg";
+    var barRow = document.createElement("div");
+    barRow.className = "row";
+    function barBtn(text, cls, fn) {
+      var b = document.createElement("button");
+      b.type = "button";
+      if (cls) b.className = cls;
+      b.textContent = text;
+      b.addEventListener("click", fn);
+      barRow.appendChild(b);
+      return b;
+    }
+    var copyBtn = barBtn("Code kopieren", "link", function () {
+      var done = function (ok) { copyBtn.textContent = ok ? "Kopiert" : "Code markieren und kopieren"; };
+      try { navigator.clipboard.writeText(net.code).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
+    });
+    var offerBtn = barBtn("Remis anbieten", "", function () { act("offer"); });
+    var acceptBtn = barBtn("Remis annehmen", "", function () { act("accept"); });
+    var declineBtn = barBtn("Ablehnen", "link", function () { act("decline"); });
+    var resignBtn = barBtn("Aufgeben", "link", function () {
+      if (window.confirm("Wirklich aufgeben?")) act("resign");
+    });
+    var leaveBtn = barBtn("Partie verlassen", "link", function () { leaveGame(); });
+    bar.appendChild(codeShow);
+    bar.appendChild(colorText);
+    bar.appendChild(barRow);
+    box.insertBefore(bar, board);
+
+    function showOnlineView() {
+      lobby.hidden = !!net;
+      bar.hidden = !net;
+      board.hidden = !net;
+      info.hidden = !net;
+      row.hidden = true;
+    }
+
+    function leaveOnlineView() {
+      clearTimeout(pollT);
+      lobby.hidden = true;
+      bar.hidden = true;
+      board.hidden = false;
+      info.hidden = false;
+      row.hidden = false;
+    }
+
+    function renderBar() {
+      var play = net.st === "play" && net.players === 2;
+      var offered = net.offer && net.offer !== net.you;
+      codeShow.textContent = net.code;
+      colorText.textContent = "Du spielst " + (net.you === "w" ? "Weiß (orange)" : "Schwarz") + ". Gib den Code deinem Gegner, falls er noch nicht beigetreten ist.";
+      colorText.hidden = net.players === 2;
+      copyBtn.hidden = net.players === 2;
+      offerBtn.hidden = !play || cur.over || !!net.offer;
+      acceptBtn.hidden = !play || cur.over || !offered;
+      declineBtn.hidden = acceptBtn.hidden;
+      resignBtn.hidden = !play || cur.over;
+      leaveBtn.textContent = net.st === "end" || cur.over ? "Zurück zur Auswahl" : "Partie verlassen";
+    }
+
+    function onlineStatus() {
+      if (!net) return "";
+      if (net.players < 2) return "Warte auf deinen Gegner. Er gibt den Code auf seinem Gerät ein.";
+      if (net.st === "end" && net.reason === "draw") return "Remis vereinbart.";
+      if (net.st === "end" && net.reason && net.reason.indexOf("resign-") === 0) {
+        return net.reason.slice(7) === net.you ? "Du hast aufgegeben." : "Dein Gegner hat aufgegeben. Du gewinnst.";
+      }
+      if (cur.over) {
+        if (cur.result === "matt") return state.turn === net.you ? "Schachmatt. Dein Gegner gewinnt." : "Schachmatt. Du gewinnst!";
+        if (cur.result === "patt") return "Patt: unentschieden.";
+        if (cur.result === "50") return "Remis (50-Züge-Regel).";
+        if (cur.result === "material") return "Remis (zu wenig Material).";
+        return "Remis (dreimal dieselbe Stellung).";
+      }
+      var t = state.turn === net.you ? "Du bist am Zug" : "Dein Gegner ist am Zug";
+      t += cur.check ? ": Schach!" : ".";
+      if (net.offer && net.offer !== net.you) t += " Dein Gegner bietet Remis an.";
+      else if (net.offer) t += " Du hast Remis angeboten.";
+      if (!net.opp) t += " Dein Gegner ist gerade nicht verbunden.";
+      return t;
+    }
+
+    function findMove(ms) {
+      return cur.moves.filter(function (x) { return moveStr(x) === ms; })[0] || null;
+    }
+
+    // Spielt Züge der Reihe nach nach. Gibt false zurück, wenn einer nicht erlaubt ist.
+    function playList(list) {
+      for (var i = 0; i < list.length; i++) {
+        cur = status(state, keys);
+        var m = findMove(list[i]);
+        if (!m) return false;
+        step(m);
+      }
+      return true;
+    }
+
+    function startsWith(a, b) {
+      if (a.length < b.length) return false;
+      for (var i = 0; i < b.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+
+    function rebuild(list) {
+      state = fromFEN(START);
+      keys = [keyOf(state)];
+      stack = [];
+      played = [];
+      last = null;
+      playList(list);
+      afterMove();
+    }
+
+    function sync(d) {
+      net.players = d.players;
+      net.st = d.status;
+      net.reason = d.reason;
+      net.offer = d.offer;
+      net.opp = !!d.opp_online;
+      var S = d.moves || [];
+      if (desync) { desync = false; rebuild(S); }
+      else if (S.length > played.length && startsWith(S, played)) {
+        var ok = playList(S.slice(played.length));
+        if (!ok) rebuild(S); else afterMove();
+      } else if (!startsWith(played, S)) rebuild(S);
+      else render();
+      if (net.st === "end") saveNet();
+      if (cur.over && net.st === "play" && !overSent && net.players === 2) {
+        overSent = true;
+        post("/api/schach/act", { code: net.code, token: net.token, action: "over" }).then(function (r) { if (r.ok && net) { net.st = r.status; net.reason = r.reason; saveNet(); render(); } });
+      }
+    }
+
+    function lost(msg) {
+      clearTimeout(pollT);
+      net = null;
+      saveNet();
+      showOnlineView();
+      lobbyMsg.textContent = msg;
+      lobbyMsg.className = "msg error";
+    }
+
+    function poll() {
+      clearTimeout(pollT);
+      if (stopped || mode !== "online" || !net) return;
+      var mine = net;
+      post("/api/schach/state", { code: net.code, token: net.token }).then(function (d) {
+        if (stopped || mode !== "online" || net !== mine) return;
+        if (d.http === 404) return lost("Diese Partie gibt es nicht mehr. Erstelle eine neue Partie.");
+        if (d.http === 401) return lost("Die Sitzung ist abgelaufen. Melde dich neu an.");
+        if (d.ok && !sending) sync(d);
+        schedule();
+      }, function () {
+        if (stopped || mode !== "online" || net !== mine) return;
+        net.opp = false;
+        render();
+        schedule();
+      });
+    }
+
+    function schedule() {
+      clearTimeout(pollT);
+      if (net && net.st !== "end") pollT = setTimeout(poll, document.hidden ? 5000 : 1500);
+    }
+
+    function sendMove(ply, ms) {
+      sending = true;
+      var mine = net;
+      post("/api/schach/move", { code: net.code, token: net.token, ply: ply, move: ms }).then(function (d) {
+        sending = false;
+        if (stopped || net !== mine) return;
+        if (d.ok) sync(d);
+        else { desync = true; poll(); }
+      }, function () {
+        sending = false;
+        if (stopped || net !== mine) return;
+        desync = true;
+        schedule();
+      });
+    }
+
+    function act(action) {
+      if (!net) return;
+      post("/api/schach/act", { code: net.code, token: net.token, action: action }).then(function (d) {
+        if (d.ok && net) sync(d);
+      }, function () {});
+    }
+
+    function beginOnline() {
+      clearTimeout(timer);
+      thinking = false;
+      overSent = false;
+      desync = false;
+      sending = false;
+      state = fromFEN(START);
+      keys = [keyOf(state)];
+      stack = [];
+      played = [];
+      last = null;
+      sel = -1;
+      targets = [];
+      cur = status(state, keys);
+      showOnlineView();
+      render();
+      poll();
+    }
+
+    function enterOnline() {
+      lobbyMsg.textContent = "";
+      if (!net) {
+        var saved = loadNet();
+        if (saved) net = { code: saved.code, token: saved.token, you: saved.you, st: "wait", players: 1, offer: null, opp: false, reason: null };
+      }
+      if (net) beginOnline();
+      else { showOnlineView(); cur = status(fromFEN(START), [keyOf(fromFEN(START))]); }
+    }
+
+    function leaveGame() {
+      clearTimeout(pollT);
+      net = null;
+      saveNet();
+      lobbyMsg.textContent = "";
+      showOnlineView();
+    }
+
+    function startNet(d, wait) {
+      net = { code: d.code, token: d.token, you: d.you, st: wait ? "wait" : "play", players: wait ? 1 : 2, offer: null, opp: true, reason: null };
+      saveNet();
+      beginOnline();
+    }
+
+    function lobbyBusy(b) { createBtn.disabled = b; joinBtn.disabled = b; }
+
+    function lobbyFail(d) {
+      var text = d.http === 401 ? "Die Sitzung ist abgelaufen. Melde dich neu an." :
+        d.http === 404 ? "Diesen Code gibt es nicht. Prüfe die Eingabe." :
+        d.http === 409 ? "Diese Partie ist schon voll." :
+        d.http === 429 ? "Zu viele Versuche. Warte kurz und versuche es erneut." :
+        "Das hat nicht geklappt. Versuche es erneut.";
+      lobbyMsg.textContent = text;
+      lobbyMsg.className = "msg error";
+      lobbyBusy(false);
+    }
+
+    createBtn.addEventListener("click", function () {
+      lobbyBusy(true);
+      lobbyMsg.className = "msg";
+      lobbyMsg.textContent = "Erstelle Partie …";
+      post("/api/schach/create", { color: onlineColor }).then(function (d) {
+        lobbyBusy(false);
+        if (stopped) return;
+        if (!d.ok) return lobbyFail(d);
+        lobbyMsg.textContent = "";
+        startNet(d, true);
+      }, function () { lobbyFail({ http: 0 }); });
+    });
+
+    function join() {
+      var code = codeIn.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      if (code.length !== 5) { lobbyMsg.className = "msg error"; lobbyMsg.textContent = "Der Code hat 5 Zeichen."; return; }
+      lobbyBusy(true);
+      lobbyMsg.className = "msg";
+      lobbyMsg.textContent = "Trete bei …";
+      post("/api/schach/join", { code: code }).then(function (d) {
+        lobbyBusy(false);
+        if (stopped) return;
+        if (!d.ok) return lobbyFail(d);
+        lobbyMsg.textContent = "";
+        codeIn.value = "";
+        startNet(d, false);
+      }, function () { lobbyFail({ http: 0 }); });
+    }
+    joinBtn.addEventListener("click", join);
+    codeIn.addEventListener("keydown", function (e) { if (e.key === "Enter") join(); });
+
+    function recolor() { if (state && (mode !== "online" || net)) render(); }
     document.addEventListener("farbe-geaendert", recolor);
 
     markMode(mode);
-    eloBox.hidden = mode === "2" || mode === "o";
-    newGame();
+    eloBox.hidden = mode === "2" || mode === "online";
+    if (mode === "online") enterOnline(); else newGame();
 
     return function stop() {
       stopped = true;
       clearTimeout(timer);
-      closeNet();
+      clearTimeout(pollT);
       document.removeEventListener("farbe-geaendert", recolor);
     };
   }
