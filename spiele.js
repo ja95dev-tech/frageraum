@@ -4725,8 +4725,8 @@ var FigurenArt = (function () {
 (function () {
   "use strict";
 
-  var FIXED = ["snake-best", "2048-best", "rennen-best", "quallen-best", "quallenimperium-v1", "wortraten-v1", "farben", "helligkeit"];
-  var BEST_KEYS = ["snake-best", "2048-best", "rennen-best", "quallen-best"];
+  var FIXED = ["snake-best", "2048-best", "rennen-best", "quallen-best", "quallenimperium-v1", "wortraten-v1", "farben", "helligkeit", "tischtennis-best"];
+  var BEST_KEYS = ["snake-best", "2048-best", "rennen-best", "quallen-best", "tischtennis-best"];
   var TRACK = /^rennstrecke:\d{1,6}$/;
   var MAX_VALUE = 200000;
 
@@ -4946,7 +4946,7 @@ var FigurenArt = (function () {
 
   function summarize(data) {
     var lines = [];
-    var names = { "snake-best": "Snake", "2048-best": "2048", "rennen-best": "Autorennen", "quallen-best": "Quallen-Runner" };
+    var names = { "snake-best": "Snake", "2048-best": "2048", "rennen-best": "Autorennen", "quallen-best": "Quallen-Runner", "tischtennis-best": "Tischtennis (längster Ballwechsel)" };
     Object.keys(names).forEach(function (k) {
       if (data[k] !== undefined) lines.push(names[k] + ": Rekord " + fmtNum(Number(data[k])));
     });
@@ -5578,6 +5578,523 @@ var FigurenArt = (function () {
     start: start
   });
 })();
+
+;
+// ===== tischtennis.js =====
+// Spiel: Tischtennis (2D, Ansicht von oben, Platte hochkant: du spielst unten und schlägst nach oben, gegen den Computer, bis 11 Punkte)
+// Intern liegt die Platte waagerecht (x = Länge, y = Breite). Beim Zeichnen und bei der Eingabe wird sie um 90 Grad gedreht.
+// Die Platte wird von oben gezeigt. Der Ball hat zusätzlich eine Höhe (z): Man sieht sie an Schatten und Größe des Balls.
+(window.Spiele = window.Spiele || []).push((function () {
+  var W = 760, H = 400;
+  var TL = 120, TR = 640, TT = 95, TB = 305;  // Platte: links, rechts, oben, unten (rundherum ist Platz zum Zurücklaufen)
+  var NETX = 380, NETH = 28;                  // Netz in der Mitte, Höhe in z-Einheiten
+  var R = 7;                                  // Ballradius
+  var G = 950;                                // Schwerkraft (in z-Richtung)
+  var DRAG = 0.35;                            // Luftwiderstand pro Sekunde (der Ball wird langsamer)
+  var BOUNCE_FRICTION = 0.8;                  // beim Aufsprung auf der Platte geht Tempo verloren
+  var PR = 17;                                // Radius des Schlägerblatts
+  var HITZ = 48;                              // bis zu dieser Höhe kann der Ball getroffen werden
+  var MIDY = (TT + TB) / 2;
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level";
+
+  var LEVELS = {
+    leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55 },
+    mittel: { name: "Mittel", speed: 370, err: 34, slip: 0.12, react: 0.3 },
+    schwer: { name: "Schwer", speed: 520, err: 14, slip: 0.04, react: 0.1 }
+  };
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  // Berechnet die Start-Geschwindigkeit, damit der Ball nach der Zeit T bei (xt, yt) auf der Platte aufkommt
+  // und dabei mit Abstand über das Netz fliegt.
+  function solve(bx, by, bz, xt, yt, T0) {
+    var T = T0, vx, vy, vz;
+    for (var i = 0; i < 24; i++) {
+      var f = DRAG / (1 - Math.exp(-DRAG * T));             // gleicht den Luftwiderstand aus
+      vx = (xt - bx) * f;
+      vy = (yt - by) * f;
+      vz = (0.5 * G * T * T - bz) / T;
+      var q = 1 - (NETX - bx) * DRAG / vx;
+      if (!(vx !== 0 && q > 0 && q < 1)) break;               // das Netz liegt nicht auf dem Weg
+      var tn = -Math.log(q) / DRAG;
+      if (!(tn > 0 && tn < T)) break;
+      var zn = bz + vz * tn - 0.5 * G * tn * tn;
+      if (zn > NETH + R + 6) break;                         // genug Abstand über dem Netz
+      T += 0.04;
+    }
+    return { vx: vx, vy: vy, vz: vz };
+  }
+
+  function start(box) {
+    var canvas = document.createElement("canvas");
+    canvas.width = H;                         // hochkant: gedreht gegenüber der Spiellogik
+    canvas.height = W;
+    canvas.className = "game-canvas";
+    canvas.style.aspectRatio = H + " / " + W;
+    canvas.style.maxWidth = "min(100%, 24rem, calc(78vh * " + (H / W).toFixed(3) + "))";
+    canvas.setAttribute("role", "img");
+    canvas.tabIndex = 0;
+    canvas.setAttribute("aria-label", "Tischtennisplatte von oben, hochkant. Du spielst unten, der Computer oben.");
+    var ctx = canvas.getContext("2d");
+
+    var levelRow = document.createElement("div");
+    levelRow.className = "chips";
+    levelRow.setAttribute("role", "group");
+    levelRow.setAttribute("aria-label", "Schwierigkeit");
+    var levelBtns = {};
+    var levelId = "mittel";
+    try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
+    Object.keys(LEVELS).forEach(function (id) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = LEVELS[id].name;
+      b.addEventListener("click", function () {
+        levelId = id;
+        try { localStorage.setItem(LEVEL_KEY, id); } catch (e) {}
+        markLevel();
+        newMatch();
+        canvas.focus({ preventScroll: true });
+      });
+      levelRow.appendChild(b);
+      levelBtns[id] = b;
+    });
+    function markLevel() {
+      Object.keys(levelBtns).forEach(function (id) { levelBtns[id].setAttribute("aria-pressed", String(id === levelId)); });
+    }
+    markLevel();
+
+    var info = document.createElement("p");
+    info.className = "msg";
+    info.setAttribute("aria-live", "polite");
+    var row = document.createElement("div");
+    row.className = "row";
+    var startBtn = document.createElement("button");
+    startBtn.type = "button";
+    startBtn.textContent = "Neues Spiel";
+    row.appendChild(startBtn);
+    row.appendChild(info);
+
+    var help = document.createElement("p");
+    help.className = "hint";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Hinter der Platte ist Platz: Weit geschlagene Bälle fliegen nach dem Aufsprung über das Plattenende hinaus, und du kannst sie noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Leertaste oder Tippen schlägt auf. Lass den Ball erst aufspringen und triff ihn dann. Wo der Ball den Schläger trifft, bestimmt die Richtung: Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger.";
+
+    box.appendChild(levelRow);
+    box.appendChild(canvas);
+    box.appendChild(row);
+    box.appendChild(help);
+
+    var best = 0;
+    try { best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch (e) {}
+
+    // ---------- Zustand ----------
+    var S = {};
+    var raf = null, lastT = 0, stopped = false, nextTimer = null;
+    var keys = {};
+    var target = { x: 170, y: MIDY };       // wohin die Maus oder der Finger zeigt
+    var banner = "";
+
+    function css(name, fb) {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fb;
+    }
+
+    function say(t) { info.textContent = t; }
+
+    function newMatch() {
+      clearTimeout(nextTimer);
+      S = {
+        score: { L: 0, R: 0 }, points: 0, state: "serve", server: "L",
+        ball: { x: 150, y: MIDY, z: 40, vx: 0, vy: 0, vz: 0 },
+        pl: { x: 170, y: MIDY, vx: 0, vy: 0, cd: 0 },
+        cpu: { x: 600, y: MIDY, vx: 0, vy: 0, cd: 0, tx: 600, ty: MIDY, plan: false },
+        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false
+      };
+      banner = "";
+      prepareServe();
+      updateText();
+    }
+
+    function serverFor(points) {
+      if (points < 20) return Math.floor(points / 2) % 2 === 0 ? "L" : "R";
+      return points % 2 === 0 ? "L" : "R";
+    }
+
+    function prepareServe() {
+      S.server = serverFor(S.points);
+      S.state = "serve";
+      S.last = null;
+      S.expect = null;
+      S.bounced = false;
+      S.rally = 0;
+      S.ball.x = S.server === "L" ? 150 : 610;
+      S.ball.y = MIDY;
+      S.ball.z = 40;
+      S.ball.vx = 0; S.ball.vy = 0; S.ball.vz = 0;
+      S.cpu.plan = false;
+      S.serveAt = performance.now() + 900;
+      banner = S.server === "L" ? "Dein Aufschlag: Leertaste/Tippen" : "Aufschlag Computer";
+      updateText();
+    }
+
+    function updateText() {
+      var t = "Du " + S.score.L + " : " + S.score.R + " Computer";
+      if (S.over) t += S.score.L > S.score.R ? ". Du hast gewonnen" : ". Der Computer hat gewonnen";
+      else if (S.rally > 1) t += ". Ballwechsel: " + S.rally;
+      t += ". Rekord: längster Ballwechsel " + best + ".";
+      say(t);
+    }
+
+    // ---------- Schläge ----------
+    function serve() {
+      var b = S.ball, side = S.server;
+      var xt = side === "L" ? NETX + 70 + Math.random() * 150 : TL + 30 + Math.random() * 190;
+      var yt = TT + 30 + Math.random() * (TB - TT - 60);
+      var v = solve(b.x, b.y, b.z, xt, yt, 0.78);
+      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      S.last = side;
+      S.expect = side === "L" ? "R" : "L";
+      S.bounced = false;
+      S.state = "rally";
+      S.rally = 1;
+      banner = "";
+    }
+
+    function playerHit() {
+      var b = S.ball, p = S.pl;
+      var dy = clamp((b.y - p.y) / (PR + R), -1, 1);           // wo der Ball den Schläger trifft
+      var forward = clamp(p.vx / 520, 0, 1) + clamp(Math.abs(p.vy) / 900, 0, 0.3);
+      var speed = clamp(forward, 0, 1);
+      var xt = NETX + 70 + 160 * speed;
+      var yt = MIDY + dy * 90;                                // weg vom Schlägermittelpunkt
+      var v = solve(b.x, b.y, b.z, xt, yt, 0.74 - 0.24 * speed);
+      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      afterHit("L");
+      p.cd = 0.2;
+    }
+
+    function cpuHit() {
+      var b = S.ball, c = S.cpu, lv = LEVELS[levelId];
+      var yt = (S.pl.y < MIDY ? MIDY + 60 : MIDY - 60) + (Math.random() - 0.5) * 50 + (Math.random() - 0.5) * 2 * lv.err;
+      var xt = TL + 30 + Math.random() * 200;
+      var T = 0.62 + Math.random() * 0.16;
+      if (Math.random() < lv.slip) xt = TL - 55;                // Patzer: der Ball fliegt zu weit ins Aus
+      var v = solve(b.x, b.y, b.z, xt, yt, T);
+      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      afterHit("R");
+      c.cd = 0.2;
+      c.plan = false;
+    }
+
+    function afterHit(side) {
+      S.last = side;
+      S.expect = side === "L" ? "R" : "L";
+      S.bounced = false;
+      S.rally++;
+      if (S.rally > S.longest) S.longest = S.rally;
+      updateText();
+    }
+
+    // ---------- Punkte ----------
+    function award(side, why) {
+      if (S.state !== "rally") return;
+      S.score[side]++;
+      S.points++;
+      S.state = "point";
+      var a = S.score.L, b2 = S.score.R;
+      if (S.longest > best) {
+        best = S.longest;
+        try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
+      }
+      if ((a >= 11 || b2 >= 11) && Math.abs(a - b2) >= 2) {
+        S.over = true;
+        banner = a > b2 ? "Du gewinnst " + a + " : " + b2 + "!" : "Computer gewinnt " + b2 + " : " + a + ".";
+        startBtn.textContent = "Noch ein Spiel";
+        updateText();
+        return;
+      }
+      banner = (side === "L" ? "Punkt für dich" : "Punkt für den Computer") + (why ? ": " + why : "");
+      updateText();
+      nextTimer = setTimeout(function () { if (!stopped) prepareServe(); }, 1300);
+    }
+
+    function other(s) { return s === "L" ? "R" : "L"; }
+
+    // Der letzte Schläger hat einen Fehler gemacht (Netz, ins Aus, falsche Seite).
+    function fault(why) { award(other(S.last), why); }
+
+    function onBounce(x) {
+      var side = x < NETX ? "L" : "R";
+      if (!S.bounced) {
+        if (side === S.expect) S.bounced = true;
+        else fault("Ball landet auf der eigenen Seite");
+      } else if (side === S.expect) {
+        award(S.last, S.last === "L" ? "Der Computer erreicht den Ball nicht" : "Du erreichst den Ball nicht");   // zweiter Aufsprung
+      } else {
+        fault("Ball landet auf der falschen Seite");
+      }
+    }
+
+    function outOfPlay() {
+      if (S.bounced) award(S.last, S.last === "L" ? "Der Computer verpasst den Ball" : "Du verpasst den Ball");
+      else fault("Ball im Aus");
+    }
+
+    function onTable(x, y) { return x >= TL && x <= TR && y >= TT && y <= TB; }
+
+    // ---------- Computergegner ----------
+    function predict() {
+      // Spielt die Flugbahn im Voraus durch und sucht die Stelle, an der der Ball nach dem Aufsprung wieder in Schlaghöhe kommt.
+      var b = { x: S.ball.x, y: S.ball.y, z: S.ball.z, vx: S.ball.vx, vy: S.ball.vy, vz: S.ball.vz };
+      var bounced = S.bounced, dt = 1 / 120, pos = { x: b.x, y: b.y };
+      for (var i = 0; i < 480; i++) {
+        var dm = Math.exp(-DRAG * dt);
+        b.vx *= dm; b.vy *= dm;
+        b.vz -= G * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+        if (b.z <= 0 && b.vz < 0 && onTable(b.x, b.y)) {
+          b.z = 0; b.vz = -b.vz * 0.88;
+          b.vx *= BOUNCE_FRICTION; b.vy *= BOUNCE_FRICTION;
+          if (b.x >= NETX) bounced = true;
+        }
+        pos = { x: b.x, y: b.y };
+        if (bounced && b.vz < 0 && b.z <= HITZ - 8 && b.x >= NETX) break;
+        if (b.x > W + 30 || b.x < -30 || b.y < -30 || b.y > H + 30 || (b.z <= 0 && !onTable(b.x, b.y))) break;
+      }
+      return pos;
+    }
+
+    function moveCpu(dt) {
+      var c = S.cpu, lv = LEVELS[levelId];
+      var tx = 610, ty = MIDY;
+      if (S.state === "rally" && S.last === "L") {
+        if (!c.plan && (S.bounced || S.ball.x > NETX)) {
+          var p = predict();
+          c.tx = p.x + 10; c.ty = p.y;
+          c.plan = true;
+          c.planAt = performance.now() + lv.react * 1000;
+        }
+        if (c.plan && performance.now() >= c.planAt) { tx = c.tx; ty = c.ty; }
+        else if (c.plan) { tx = c.x; ty = c.y; }
+      }
+      var dx = clamp(tx, NETX + 16, W - 14) - c.x, dy = clamp(ty, 40, H - 40) - c.y;
+      var dist = Math.sqrt(dx * dx + dy * dy), step = lv.speed * dt;
+      var ox = c.x, oy = c.y;
+      if (dist > step) { c.x += dx / dist * step; c.y += dy / dist * step; } else { c.x += dx; c.y += dy; }
+      c.vx = (c.x - ox) / dt; c.vy = (c.y - oy) / dt;
+    }
+
+    // ---------- Schritt und Zeichnen ----------
+    function movePlayer(dt) {
+      var p = S.pl, ox = p.x, oy = p.y, k = 420 * dt;
+      if (keys.ArrowUp || keys.w) target.x += k;        // nach oben = zum Netz
+      if (keys.ArrowDown || keys.s) target.x -= k;
+      if (keys.ArrowLeft || keys.a) target.y -= k;
+      if (keys.ArrowRight || keys.d) target.y += k;
+      target.x = clamp(target.x, 14, NETX - 16);
+      target.y = clamp(target.y, 40, H - 40);
+      var f = 1 - Math.exp(-24 * dt);                       // leicht geglättet
+      p.x += (target.x - p.x) * f;
+      p.y += (target.y - p.y) * f;
+      p.vx = (p.x - ox) / dt; p.vy = (p.y - oy) / dt;
+    }
+
+    function hits(pad) {
+      var b = S.ball, dx = b.x - pad.x, dy = b.y - pad.y;
+      return b.z <= HITZ && dx * dx + dy * dy <= (PR + R) * (PR + R);
+    }
+
+    function stepBall(dt) {
+      var b = S.ball, px = b.x, dm = Math.exp(-DRAG * dt);
+      b.vx *= dm; b.vy *= dm;
+      b.vz -= G * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.z += b.vz * dt;
+
+      // Netz: beim Überqueren der Mitte muss der Ball hoch genug sein
+      if ((px < NETX) !== (b.x < NETX) && b.y > TT - 12 && b.y < TB + 12 && b.z < NETH + R * 0.4) { fault("Netz"); return; }
+
+      if (b.z <= 0 && b.vz < 0) {
+        if (onTable(b.x, b.y)) {
+          b.z = 0;
+          b.vz = -b.vz * 0.88;
+          b.vx *= BOUNCE_FRICTION; b.vy *= BOUNCE_FRICTION;
+          onBounce(b.x);
+          if (S.state !== "rally") return;
+        } else { outOfPlay(); return; }                      // Ball fällt neben der Platte auf den Boden
+      }
+      if (b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) { outOfPlay(); return; }
+
+      // Geschlagen wird erst, nachdem der Ball auf der eigenen Seite aufgesprungen ist
+      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && hits(S.pl)) playerHit();
+      else if (S.bounced && S.expect === "R" && S.cpu.cd <= 0 && hits(S.cpu)) cpuHit();
+    }
+
+    function frame(t) {
+      if (stopped) return;
+      var dt = Math.min(0.033, (t - lastT) / 1000 || 0.016);
+      lastT = t;
+      if (!document.hidden) {
+        var sub = 4, h = dt / sub;
+        for (var i = 0; i < sub; i++) {
+          movePlayer(h);
+          moveCpu(h);
+          S.pl.cd -= h; S.cpu.cd -= h;
+          if (S.state === "rally") stepBall(h);
+        }
+        if (S.state === "serve" && S.server === "R" && performance.now() >= S.serveAt) serve();
+      }
+      draw();
+      raf = requestAnimationFrame(frame);
+    }
+
+    function paddle(p, color, dir) {
+      // Schatten, Griff, Schlägerblatt von oben (dir: Richtung des Griffs, -1 nach links, 1 nach rechts)
+      ctx.fillStyle = "rgba(0,0,0,0.16)";
+      ctx.beginPath(); ctx.ellipse(p.x + 4, p.y + 6, PR, PR * 0.95, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#8a6238";
+      ctx.fillRect(dir > 0 ? p.x + PR - 4 : p.x - PR - 14, p.y - 4, 18, 8);
+      ctx.fillStyle = "#1b1b1b";
+      ctx.beginPath(); ctx.arc(p.x, p.y, PR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, PR - 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.beginPath(); ctx.arc(p.x - 4, p.y - 5, PR * 0.45, 0, Math.PI * 2); ctx.fill();
+    }
+
+    function draw() {
+      var panel = css("--panel", "#ffffff"), ink = css("--ink", "#17313a"), accent = css("--accent", "#2447d6");
+      var b = S.ball;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = panel;
+      ctx.fillRect(0, 0, H, W);
+      ctx.setTransform(0, -1, 1, 0, 0, W);       // ab hier: x = nach oben, y = nach rechts
+      // Boden
+      ctx.fillStyle = ink;
+      ctx.globalAlpha = 0.05;
+      for (var gx = 0; gx < W; gx += 40) ctx.fillRect(gx, 0, 1, H);
+      for (var gy = 0; gy < H; gy += 40) ctx.fillRect(0, gy, W, 1);
+      ctx.globalAlpha = 1;
+      // Platte mit Schatten
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.fillRect(TL - 8, TT + 6, TR - TL, TB - TT);
+      ctx.fillStyle = accent;
+      ctx.fillRect(TL, TT, TR - TL, TB - TT);
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(TR - 5, TT, 5, TB - TT);
+      // Weiße Linien
+      ctx.strokeStyle = "#ffffff";
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(TL + 1.5, TT + 1.5, TR - TL - 3, TB - TT - 3);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(TL, MIDY); ctx.lineTo(TR, MIDY); ctx.stroke();
+      ctx.globalAlpha = 1;
+      // Netz (von oben eine Linie über die ganze Breite der Platte)
+      ctx.fillStyle = "rgba(0,0,0,0.2)";
+      ctx.fillRect(NETX - 1, TT - 12 + 5, 6, TB - TT + 24);
+      ctx.fillStyle = "#f4f4f4";
+      ctx.fillRect(NETX - 3, TT - 12, 6, TB - TT + 24);
+      ctx.strokeStyle = "#555";
+      ctx.lineWidth = 1;
+      for (var ny = TT - 10; ny < TB + 12; ny += 6) { ctx.beginPath(); ctx.moveTo(NETX - 3, ny); ctx.lineTo(NETX + 3, ny + 3); ctx.stroke(); }
+      ctx.fillStyle = "#222";
+      ctx.fillRect(NETX - 5, TT - 15, 10, 5);
+      ctx.fillRect(NETX - 5, TB + 10, 10, 5);
+      // Schläger unter dem Ball, wenn der Ball tiefer ist, über dem Ball sonst
+      paddle(S.pl, "#c62f3a", -1);
+      paddle(S.cpu, "#1b1b1b", 1);
+      // Schatten des Balls: wandert mit der Höhe nach rechts unten
+      var sx = b.x - b.z * 0.28, sy = b.y + b.z * 0.28;
+      var onT = onTable(b.x, b.y);
+      ctx.fillStyle = "#000";
+      ctx.globalAlpha = onT ? 0.3 : 0.14;
+      ctx.beginPath(); ctx.ellipse(sx, sy, R * 0.95, R * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      // Ball: höher = größer und weiter nach oben versetzt
+      var bx = b.x + b.z * 0.5, by = b.y, br = R * (1 + b.z / 170);
+      ctx.fillStyle = "#fff6e0";
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // Anzeige (ungedreht)
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = ink;
+      ctx.font = "700 28px Georgia, serif";
+      ctx.textAlign = "left";
+      ctx.fillText("Computer " + S.score.R, 14, 38);
+      ctx.fillText("Du " + S.score.L, 14, W - 20);
+      if (banner) {
+        ctx.font = "700 22px Georgia, serif";
+        var lines = banner.split(": "), bw = 0, li;
+        for (li = 0; li < lines.length; li++) bw = Math.max(bw, ctx.measureText(lines[li]).width);
+        bw = Math.min(H - 16, bw + 28);
+        var bh = lines.length * 30 + 14;
+        ctx.fillStyle = panel;
+        ctx.globalAlpha = 0.92;
+        ctx.fillRect(H / 2 - bw / 2, W / 2 - bh / 2, bw, bh);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = ink;
+        ctx.textAlign = "center";
+        for (li = 0; li < lines.length; li++) ctx.fillText(lines[li], H / 2, W / 2 - bh / 2 + 30 + li * 30 - 5, H - 30);
+      }
+    }
+
+    // ---------- Eingaben ----------
+    function canvasPoint(e) {
+      var r = canvas.getBoundingClientRect();
+      return { x: W - (e.clientY - r.top) * W / r.height, y: (e.clientX - r.left) * H / r.width };
+    }
+
+    function tryServe() {
+      if (S.state === "serve" && S.server === "L" && !S.over) serve();
+    }
+
+    canvas.addEventListener("pointermove", function (e) {
+      var p = canvasPoint(e);
+      target.x = p.x; target.y = p.y;
+    });
+    canvas.addEventListener("pointerdown", function (e) {
+      canvas.focus({ preventScroll: true });
+      var p = canvasPoint(e);
+      target.x = p.x; target.y = p.y;
+      tryServe();
+    });
+
+    function onKey(e) {
+      if (!canvas.offsetParent) return;
+      var t = e.target && e.target.tagName;
+      if (t === "INPUT" || t === "TEXTAREA" || t === "BUTTON") return;
+      var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (e.type === "keydown" && (k === " " || k === "Enter")) { e.preventDefault(); tryServe(); return; }
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "w", "s"].indexOf(k) < 0) return;
+      e.preventDefault();
+      keys[k] = e.type === "keydown";
+    }
+
+    startBtn.addEventListener("click", function () { startBtn.textContent = "Neues Spiel"; newMatch(); canvas.focus({ preventScroll: true }); });
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("keyup", onKey);
+    document.addEventListener("farbe-geaendert", draw);
+
+    // Für Tests
+    canvas.__tt = function () { return { S: S, target: target }; };
+
+    newMatch();
+    raf = requestAnimationFrame(frame);
+
+    return function stop() {
+      stopped = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(nextTimer);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keyup", onKey);
+      document.removeEventListener("farbe-geaendert", draw);
+    };
+  }
+
+  return { id: "tischtennis", name: "Tischtennis", start: start, _engine: { solve: solve, NETX: NETX, NETH: NETH, R: R, G: G } };
+})());
 
 ;
 // ===== wortraten.js =====

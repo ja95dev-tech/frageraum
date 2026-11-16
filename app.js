@@ -551,6 +551,7 @@
     "Die Rennstrecke erzeugt zufällige Strecken über 3 Runden. Deine Bestzeit wird für jede Strecke gespeichert.",
     "Die Uhr kann auch Stoppuhr, Timer und Wecker.",
     "Mit Strg+Enter sendest du eine Frage ab, ohne zur Maus zu greifen.",
+    "Beim Tischtennis lässt du den Ball erst aufspringen und schlägst ihn dann. Wo er den Schläger trifft, bestimmt die Richtung.",
     "Im Quallen-Shop tauschst du Quallen gegen dauerhafte Fähigkeiten, statt nur den Bonus zu behalten."
   ];
 
@@ -644,6 +645,10 @@
       return fmtInt(w.stats.played) + " gespielt, Serie " + fmtInt(num(w.stats.streak)) + ", längste Serie " + fmtInt(num(w.stats.best));
     } },
     { id: "snake", icon: "🐍", name: "Snake", desc: "Der Klassiker", stat: bestStat("snake-best") },
+    { id: "tischtennis", icon: "🏓", name: "Tischtennis", desc: "Ansicht von oben, gegen den Computer, bis 11 Punkte", stat: function () {
+      var v = Number(store.get("tischtennis-best"));
+      return v > 0 ? "Längster Ballwechsel: " + fmtInt(v) : "Noch nicht gespielt";
+    } },
     { id: "2048", icon: "🔢", name: "2048", desc: "Zahlen verschmelzen", stat: bestStat("2048-best") },
     { id: "autorennen", icon: "🏎️", name: "Autorennen", desc: "Hindernissen ausweichen, das Tempo steigt", stat: bestStat("rennen-best") },
     { id: "rennstrecke", icon: "🏁", name: "Rennstrecke", desc: "Zeitfahren auf zufälligen Strecken", stat: function () {
