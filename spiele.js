@@ -5583,47 +5583,98 @@ var FigurenArt = (function () {
 // ===== tischtennis.js =====
 // Spiel: Tischtennis (2D, Ansicht von oben, Platte hochkant: du spielst unten und schlägst nach oben, gegen den Computer, bis 11 Punkte)
 // Intern liegt die Platte waagerecht (x = Länge, y = Breite). Beim Zeichnen und bei der Eingabe wird sie um 90 Grad gedreht.
-// Die Platte wird von oben gezeigt. Der Ball hat zusätzlich eine Höhe (z): Man sieht sie an Schatten und Größe des Balls.
+// Der Ball hat zusätzlich eine Höhe (z) und Spin: Topspin sinkt schneller und springt flach nach vorn,
+// Unterschnitt schwebt und bremst nach dem Aufsprung, Seitenspin lässt den Ball in der Luft und beim Aufsprung zur Seite wandern.
 (window.Spiele = window.Spiele || []).push((function () {
-  var W = 760, H = 400;
-  var TL = 120, TR = 640, TT = 95, TB = 305;  // Platte: links, rechts, oben, unten (rundherum ist Platz zum Zurücklaufen)
-  var NETX = 380, NETH = 28;                  // Netz in der Mitte, Höhe in z-Einheiten
+  var W = 760, H = 420;                       // Länge und Breite des Spielfelds
+  var TL = 120, TR = 640;                     // Platte: von links nach rechts (Länge 520, wie 274 cm)
+  var TT = 66, TB = 354;                      // Platte: oben bis unten (Breite 288, wie 152,5 cm)
+  var NETX = 380, NETH = 28, NETEXT = 26;     // Netz in der Mitte, Höhe und Überstand an den Seiten
   var R = 7;                                  // Ballradius
   var G = 950;                                // Schwerkraft (in z-Richtung)
-  var DRAG = 0.35;                            // Luftwiderstand pro Sekunde (der Ball wird langsamer)
+  var DRAG = 0.35;                            // Luftwiderstand pro Sekunde
   var BOUNCE_FRICTION = 0.8;                  // beim Aufsprung auf der Platte geht Tempo verloren
-  var PR = 17;                                // Radius des Schlägerblatts
-  var HITZ = 48;                              // bis zu dieser Höhe kann der Ball getroffen werden
+  var MAGNUS = 330;                           // Seitenkraft durch Seitenspin
+  var DIP = 260;                              // zusätzliche Schwerkraft durch Topspin (bei Unterschnitt weniger)
+  var KICK = 150;                             // Seitenschub beim Aufsprung durch Seitenspin
+  var PR = 18;                                // Radius des Schlägerblatts
+  var REACH = PR + R + 5;                     // so weit reicht der Schläger (großzügig)
+  var HITZ = 56;                              // bis zu dieser Höhe kann der Ball getroffen werden
   var MIDY = (TT + TB) / 2;
   var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level";
 
   var LEVELS = {
-    leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55 },
-    mittel: { name: "Mittel", speed: 370, err: 34, slip: 0.12, react: 0.3 },
-    schwer: { name: "Schwer", speed: 520, err: 14, slip: 0.04, react: 0.1 }
+    leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
+    mittel: { name: "Mittel", speed: 370, err: 34, slip: 0.12, react: 0.3, spin: 0.35 },
+    schwer: { name: "Schwer", speed: 520, err: 14, slip: 0.04, react: 0.1, spin: 0.6 }
   };
+  var STROKES = { normal: ["Normal", 0], top: ["Topspin", 0.9], slice: ["Unterschnitt", -0.9] };
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
-  // Berechnet die Start-Geschwindigkeit, damit der Ball nach der Zeit T bei (xt, yt) auf der Platte aufkommt
-  // und dabei mit Abstand über das Netz fliegt.
-  function solve(bx, by, bz, xt, yt, T0) {
-    var T = T0, vx, vy, vz;
-    for (var i = 0; i < 24; i++) {
-      var f = DRAG / (1 - Math.exp(-DRAG * T));             // gleicht den Luftwiderstand aus
-      vx = (xt - bx) * f;
-      vy = (yt - by) * f;
-      vz = (0.5 * G * T * T - bz) / T;
-      var q = 1 - (NETX - bx) * DRAG / vx;
-      if (!(vx !== 0 && q > 0 && q < 1)) break;               // das Netz liegt nicht auf dem Weg
-      var tn = -Math.log(q) / DRAG;
-      if (!(tn > 0 && tn < T)) break;
-      var zn = bz + vz * tn - 0.5 * G * tn * tn;
-      if (zn > NETH + R + 6) break;                         // genug Abstand über dem Netz
+  // ---------- Physik (wird vom Spiel, der Flugbahn-Vorschau und dem Computer gemeinsam benutzt) ----------
+  function advance(b, dt) {
+    var dm = Math.exp(-DRAG * dt);
+    b.vx *= dm; b.vy *= dm;
+    b.vy += b.sd * MAGNUS * dt;                  // Seitenspin lenkt den Ball ab
+    b.vz -= (G + b.sp * DIP) * dt;               // Topspin zieht nach unten, Unterschnitt trägt
+    b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+    var sm = Math.exp(-0.25 * dt);
+    b.sp *= sm; b.sd *= sm;
+  }
+
+  function bounce(b) {
+    b.z = 0;
+    b.vz = -b.vz * clamp(0.88 - 0.1 * b.sp, 0.7, 0.98);
+    var f = BOUNCE_FRICTION * (1 + 0.35 * b.sp);   // Topspin schiebt nach vorn, Unterschnitt bremst
+    b.vx *= f; b.vy *= f;
+    b.vy += b.sd * KICK;                           // Seitenspin schiebt zur Seite
+    b.sp *= 0.6; b.sd *= 0.6;
+  }
+
+  // Fliegt den Ball bis zum ersten Aufsprung. Gibt den Landepunkt und die Höhe über dem Netz zurück.
+  function simulate(bx, by, bz, v, sp, sd) {
+    var b = { x: bx, y: by, z: bz, vx: v.vx, vy: v.vy, vz: v.vz, sp: sp, sd: sd }, dt = 1 / 120, zNet = null;
+    for (var i = 0; i < 360; i++) {
+      var px = b.x;
+      advance(b, dt);
+      if (zNet === null && (px < NETX) !== (b.x < NETX)) zNet = b.z;
+      if (b.z <= 0 && b.vz < 0) break;
+    }
+    return { x: b.x, y: b.y, zNet: zNet };
+  }
+
+  function base(bx, by, bz, ax, ay, T) {
+    var f = DRAG / (1 - Math.exp(-DRAG * T));
+    return { vx: (ax - bx) * f, vy: (ay - by) * f, vz: (0.5 * G * T * T - bz) / T };
+  }
+
+  // Berechnet die Start-Geschwindigkeit, damit der Ball nach etwa der Zeit T bei (xt, yt) auf der Platte aufkommt,
+  // auch mit Spin, und dabei mit Abstand über das Netz fliegt.
+  function plan(bx, by, bz, xt, yt, T0, sp, sd) {
+    var T = T0, v = null;
+    for (var i = 0; i < 20; i++) {
+      var ax = xt, ay = yt, r;
+      for (var j = 0; j < 4; j++) {
+        v = base(bx, by, bz, ax, ay, T);
+        r = simulate(bx, by, bz, v, sp, sd);
+        ax += xt - r.x; ay += yt - r.y;
+      }
+      v = base(bx, by, bz, ax, ay, T);
+      r = simulate(bx, by, bz, v, sp, sd);
+      if (r.zNet === null || r.zNet > NETH + R + 6) return v;
       T += 0.04;
     }
-    return { vx: vx, vy: vy, vz: vz };
+    return v;
   }
+
+  function segDist2(ax, ay, bx, by, cx, cy) {
+    var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, t = l2 ? clamp(((cx - ax) * dx + (cy - ay) * dy) / l2, 0, 1) : 0;
+    var qx = ax + dx * t - cx, qy = ay + dy * t - cy;
+    return qx * qx + qy * qy;
+  }
+
+  function onTable(x, y) { return x >= TL && x <= TR && y >= TT && y <= TB; }
 
   function start(box) {
     var canvas = document.createElement("canvas");
@@ -5637,32 +5688,48 @@ var FigurenArt = (function () {
     canvas.setAttribute("aria-label", "Tischtennisplatte von oben, hochkant. Du spielst unten, der Computer oben.");
     var ctx = canvas.getContext("2d");
 
-    var levelRow = document.createElement("div");
-    levelRow.className = "chips";
-    levelRow.setAttribute("role", "group");
-    levelRow.setAttribute("aria-label", "Schwierigkeit");
-    var levelBtns = {};
-    var levelId = "mittel";
-    try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
-    Object.keys(LEVELS).forEach(function (id) {
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = "chip";
-      b.textContent = LEVELS[id].name;
-      b.addEventListener("click", function () {
-        levelId = id;
-        try { localStorage.setItem(LEVEL_KEY, id); } catch (e) {}
-        markLevel();
-        newMatch();
-        canvas.focus({ preventScroll: true });
+    function chipGroup(label, entries, onPick) {
+      var rowEl = document.createElement("div");
+      rowEl.className = "chips";
+      rowEl.setAttribute("role", "group");
+      rowEl.setAttribute("aria-label", label);
+      var btns = {};
+      Object.keys(entries).forEach(function (id) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip";
+        b.textContent = entries[id];
+        b.addEventListener("click", function () { onPick(id); canvas.focus({ preventScroll: true }); });
+        rowEl.appendChild(b);
+        btns[id] = b;
       });
-      levelRow.appendChild(b);
-      levelBtns[id] = b;
-    });
-    function markLevel() {
-      Object.keys(levelBtns).forEach(function (id) { levelBtns[id].setAttribute("aria-pressed", String(id === levelId)); });
+      return {
+        el: rowEl,
+        mark: function (active) { Object.keys(btns).forEach(function (id) { btns[id].setAttribute("aria-pressed", String(id === active)); }); }
+      };
     }
-    markLevel();
+
+    var levelId = "mittel", strokeId = "normal";
+    try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
+
+    var levelNames = {};
+    Object.keys(LEVELS).forEach(function (id) { levelNames[id] = LEVELS[id].name; });
+    var levelGroup = chipGroup("Schwierigkeit", levelNames, function (id) {
+      levelId = id;
+      try { localStorage.setItem(LEVEL_KEY, id); } catch (e) {}
+      levelGroup.mark(levelId);
+      newMatch();
+    });
+    levelGroup.mark(levelId);
+
+    var strokeNames = {};
+    Object.keys(STROKES).forEach(function (id) { strokeNames[id] = STROKES[id][0]; });
+    var strokeGroup = chipGroup("Schlagart (Tasten 1, 2, 3)", strokeNames, function (id) { setStroke(id); });
+    strokeGroup.mark(strokeId);
+    function setStroke(id) {
+      strokeId = id;
+      strokeGroup.mark(id);
+    }
 
     var info = document.createElement("p");
     info.className = "msg";
@@ -5677,9 +5744,10 @@ var FigurenArt = (function () {
 
     var help = document.createElement("p");
     help.className = "hint";
-    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Hinter der Platte ist Platz: Weit geschlagene Bälle fliegen nach dem Aufsprung über das Plattenende hinaus, und du kannst sie noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Leertaste oder Tippen schlägt auf. Lass den Ball erst aufspringen und triff ihn dann. Wo der Ball den Schläger trifft, bestimmt die Richtung: Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger.";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Leertaste oder Tippen schlägt auf. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin: Topspin (Taste 2) lässt den Ball nach dem Aufsprung nach vorn springen, Unterschnitt (Taste 3) macht ihn kurz und hoch. Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen.";
 
-    box.appendChild(levelRow);
+    box.appendChild(levelGroup.el);
+    box.appendChild(strokeGroup.el);
     box.appendChild(canvas);
     box.appendChild(row);
     box.appendChild(help);
@@ -5701,14 +5769,16 @@ var FigurenArt = (function () {
 
     function say(t) { info.textContent = t; }
 
+    function newBall(x, y, z) { return { x: x, y: y, z: z, vx: 0, vy: 0, vz: 0, sp: 0, sd: 0, rot: 0 }; }
+
     function newMatch() {
       clearTimeout(nextTimer);
       S = {
         score: { L: 0, R: 0 }, points: 0, state: "serve", server: "L",
-        ball: { x: 150, y: MIDY, z: 40, vx: 0, vy: 0, vz: 0 },
+        ball: newBall(150, MIDY, 40),
         pl: { x: 170, y: MIDY, vx: 0, vy: 0, cd: 0 },
         cpu: { x: 600, y: MIDY, vx: 0, vy: 0, cd: 0, tx: 600, ty: MIDY, plan: false },
-        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false
+        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, trail: []
       };
       banner = "";
       prepareServe();
@@ -5727,10 +5797,8 @@ var FigurenArt = (function () {
       S.expect = null;
       S.bounced = false;
       S.rally = 0;
-      S.ball.x = S.server === "L" ? 150 : 610;
-      S.ball.y = MIDY;
-      S.ball.z = 40;
-      S.ball.vx = 0; S.ball.vy = 0; S.ball.vz = 0;
+      S.trail = [];
+      S.ball = newBall(S.server === "L" ? 150 : 610, MIDY, 40);
       S.cpu.plan = false;
       S.serveAt = performance.now() + 900;
       banner = S.server === "L" ? "Dein Aufschlag: Leertaste/Tippen" : "Aufschlag Computer";
@@ -5746,12 +5814,16 @@ var FigurenArt = (function () {
     }
 
     // ---------- Schläge ----------
+    function launch(b, v, sp, sd) {
+      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      b.sp = sp; b.sd = sd;
+    }
+
     function serve() {
       var b = S.ball, side = S.server;
       var xt = side === "L" ? NETX + 70 + Math.random() * 150 : TL + 30 + Math.random() * 190;
-      var yt = TT + 30 + Math.random() * (TB - TT - 60);
-      var v = solve(b.x, b.y, b.z, xt, yt, 0.78);
-      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      var yt = TT + 40 + Math.random() * (TB - TT - 80);
+      launch(b, plan(b.x, b.y, b.z, xt, yt, 0.78, 0, 0), 0, 0);
       S.last = side;
       S.expect = side === "L" ? "R" : "L";
       S.bounced = false;
@@ -5766,21 +5838,25 @@ var FigurenArt = (function () {
       var forward = clamp(p.vx / 520, 0, 1) + clamp(Math.abs(p.vy) / 900, 0, 0.3);
       var speed = clamp(forward, 0, 1);
       var xt = NETX + 70 + 160 * speed;
-      var yt = MIDY + dy * 90;                                // weg vom Schlägermittelpunkt
-      var v = solve(b.x, b.y, b.z, xt, yt, 0.74 - 0.24 * speed);
-      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      var yt = MIDY + dy * 115;                                // weg vom Schlägermittelpunkt
+      var sp = STROKES[strokeId][1];
+      var sd = clamp(p.vy / 650, -1, 1) * 0.9;                 // Seitwärtsbewegung gibt Seitenspin
+      if (Math.abs(sd) < 0.12) sd = 0;
+      launch(b, plan(b.x, b.y, b.z, xt, yt, 0.74 - 0.24 * speed, sp, sd), sp, sd);
       afterHit("L");
       p.cd = 0.2;
     }
 
     function cpuHit() {
       var b = S.ball, c = S.cpu, lv = LEVELS[levelId];
-      var yt = (S.pl.y < MIDY ? MIDY + 60 : MIDY - 60) + (Math.random() - 0.5) * 50 + (Math.random() - 0.5) * 2 * lv.err;
+      var yt = (S.pl.y < MIDY ? MIDY + 80 : MIDY - 80) + (Math.random() - 0.5) * 70 + (Math.random() - 0.5) * 2 * lv.err;
       var xt = TL + 30 + Math.random() * 200;
       var T = 0.62 + Math.random() * 0.16;
+      var sp = 0, sd = 0;
+      if (Math.random() < lv.spin) sp = Math.random() < 0.5 ? 0.8 : -0.8;
+      if (Math.random() < lv.spin * 0.7) sd = (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.4);
       if (Math.random() < lv.slip) xt = TL - 55;                // Patzer: der Ball fliegt zu weit ins Aus
-      var v = solve(b.x, b.y, b.z, xt, yt, T);
-      b.vx = v.vx; b.vy = v.vy; b.vz = v.vz;
+      launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("R");
       c.cd = 0.2;
       c.plan = false;
@@ -5840,24 +5916,19 @@ var FigurenArt = (function () {
       else fault("Ball im Aus");
     }
 
-    function onTable(x, y) { return x >= TL && x <= TR && y >= TT && y <= TB; }
-
     // ---------- Computergegner ----------
     function predict() {
-      // Spielt die Flugbahn im Voraus durch und sucht die Stelle, an der der Ball nach dem Aufsprung wieder in Schlaghöhe kommt.
-      var b = { x: S.ball.x, y: S.ball.y, z: S.ball.z, vx: S.ball.vx, vy: S.ball.vy, vz: S.ball.vz };
+      // Spielt die Flugbahn (mit Spin) im Voraus durch und sucht die Stelle, an der der Ball nach dem Aufsprung wieder in Schlaghöhe kommt.
+      var s = S.ball, b = { x: s.x, y: s.y, z: s.z, vx: s.vx, vy: s.vy, vz: s.vz, sp: s.sp, sd: s.sd };
       var bounced = S.bounced, dt = 1 / 120, pos = { x: b.x, y: b.y };
       for (var i = 0; i < 480; i++) {
-        var dm = Math.exp(-DRAG * dt);
-        b.vx *= dm; b.vy *= dm;
-        b.vz -= G * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+        advance(b, dt);
         if (b.z <= 0 && b.vz < 0 && onTable(b.x, b.y)) {
-          b.z = 0; b.vz = -b.vz * 0.88;
-          b.vx *= BOUNCE_FRICTION; b.vy *= BOUNCE_FRICTION;
+          bounce(b);
           if (b.x >= NETX) bounced = true;
         }
         pos = { x: b.x, y: b.y };
-        if (bounced && b.vz < 0 && b.z <= HITZ - 8 && b.x >= NETX) break;
+        if (bounced && b.vz < 0 && b.z <= HITZ - 12 && b.x >= NETX) break;
         if (b.x > W + 30 || b.x < -30 || b.y < -30 || b.y > H + 30 || (b.z <= 0 && !onTable(b.x, b.y))) break;
       }
       return pos;
@@ -5898,27 +5969,23 @@ var FigurenArt = (function () {
       p.vx = (p.x - ox) / dt; p.vy = (p.y - oy) / dt;
     }
 
-    function hits(pad) {
-      var b = S.ball, dx = b.x - pad.x, dy = b.y - pad.y;
-      return b.z <= HITZ && dx * dx + dy * dy <= (PR + R) * (PR + R);
+    // Trifft der Ball den Schläger? Die ganze Strecke des Balls seit dem letzten Schritt zählt, damit schnelle Bälle nicht hindurchfliegen.
+    function hits(pad, px, py, pz) {
+      var b = S.ball;
+      return Math.min(pz, b.z) <= HITZ && segDist2(px, py, b.x, b.y, pad.x, pad.y) <= REACH * REACH;
     }
 
     function stepBall(dt) {
-      var b = S.ball, px = b.x, dm = Math.exp(-DRAG * dt);
-      b.vx *= dm; b.vy *= dm;
-      b.vz -= G * dt;
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-      b.z += b.vz * dt;
+      var b = S.ball, px = b.x, py = b.y, pz = b.z;
+      advance(b, dt);
+      b.rot += (b.sp * 11 + b.sd * 9) * dt;
 
       // Netz: beim Überqueren der Mitte muss der Ball hoch genug sein
-      if ((px < NETX) !== (b.x < NETX) && b.y > TT - 12 && b.y < TB + 12 && b.z < NETH + R * 0.4) { fault("Netz"); return; }
+      if ((px < NETX) !== (b.x < NETX) && b.y > TT - NETEXT && b.y < TB + NETEXT && b.z < NETH + R * 0.4) { fault("Netz"); return; }
 
       if (b.z <= 0 && b.vz < 0) {
         if (onTable(b.x, b.y)) {
-          b.z = 0;
-          b.vz = -b.vz * 0.88;
-          b.vx *= BOUNCE_FRICTION; b.vy *= BOUNCE_FRICTION;
+          bounce(b);
           onBounce(b.x);
           if (S.state !== "rally") return;
         } else { outOfPlay(); return; }                      // Ball fällt neben der Platte auf den Boden
@@ -5926,8 +5993,8 @@ var FigurenArt = (function () {
       if (b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) { outOfPlay(); return; }
 
       // Geschlagen wird erst, nachdem der Ball auf der eigenen Seite aufgesprungen ist
-      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && hits(S.pl)) playerHit();
-      else if (S.bounced && S.expect === "R" && S.cpu.cd <= 0 && hits(S.cpu)) cpuHit();
+      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && hits(S.pl, px, py, pz)) playerHit();
+      else if (S.bounced && S.expect === "R" && S.cpu.cd <= 0 && hits(S.cpu, px, py, pz)) cpuHit();
     }
 
     function frame(t) {
@@ -5942,16 +6009,20 @@ var FigurenArt = (function () {
           S.pl.cd -= h; S.cpu.cd -= h;
           if (S.state === "rally") stepBall(h);
         }
+        if (S.state === "rally" || S.state === "point") {
+          S.trail.push({ x: S.ball.x, y: S.ball.y, z: S.ball.z });
+          if (S.trail.length > 16) S.trail.shift();
+        } else if (S.trail.length) S.trail = [];
         if (S.state === "serve" && S.server === "R" && performance.now() >= S.serveAt) serve();
       }
       draw();
       raf = requestAnimationFrame(frame);
     }
 
-    function paddle(p, color, dir) {
+    function paddle(p, color, dir, active) {
       // Schatten, Griff, Schlägerblatt von oben (dir: Richtung des Griffs, -1 nach links, 1 nach rechts)
       ctx.fillStyle = "rgba(0,0,0,0.16)";
-      ctx.beginPath(); ctx.ellipse(p.x + 4, p.y + 6, PR, PR * 0.95, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(p.x - 5, p.y + 5, PR, PR * 0.95, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "#8a6238";
       ctx.fillRect(dir > 0 ? p.x + PR - 4 : p.x - PR - 14, p.y - 4, 18, 8);
       ctx.fillStyle = "#1b1b1b";
@@ -5959,7 +6030,12 @@ var FigurenArt = (function () {
       ctx.fillStyle = color;
       ctx.beginPath(); ctx.arc(p.x, p.y, PR - 3, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.beginPath(); ctx.arc(p.x - 4, p.y - 5, PR * 0.45, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x + 5, p.y - 4, PR * 0.45, 0, Math.PI * 2); ctx.fill();
+      if (active) {                                   // Ring: jetzt kann der Ball getroffen werden
+        ctx.strokeStyle = "#ffd23f";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, REACH, 0, Math.PI * 2); ctx.stroke();
+      }
     }
 
     function draw() {
@@ -5990,25 +6066,34 @@ var FigurenArt = (function () {
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(TL, MIDY); ctx.lineTo(TR, MIDY); ctx.stroke();
       ctx.globalAlpha = 1;
-      // Netz (von oben eine Linie über die ganze Breite der Platte)
+      // Netz (von oben eine Linie über die ganze Breite der Platte und etwas darüber hinaus)
+      var ny0 = TT - NETEXT, ny1 = TB + NETEXT;
       ctx.fillStyle = "rgba(0,0,0,0.2)";
-      ctx.fillRect(NETX - 1, TT - 12 + 5, 6, TB - TT + 24);
+      ctx.fillRect(NETX - 8, ny0 + 5, 6, ny1 - ny0);
       ctx.fillStyle = "#f4f4f4";
-      ctx.fillRect(NETX - 3, TT - 12, 6, TB - TT + 24);
+      ctx.fillRect(NETX - 3, ny0, 6, ny1 - ny0);
       ctx.strokeStyle = "#555";
       ctx.lineWidth = 1;
-      for (var ny = TT - 10; ny < TB + 12; ny += 6) { ctx.beginPath(); ctx.moveTo(NETX - 3, ny); ctx.lineTo(NETX + 3, ny + 3); ctx.stroke(); }
+      for (var ny = ny0 + 2; ny < ny1; ny += 6) { ctx.beginPath(); ctx.moveTo(NETX - 3, ny); ctx.lineTo(NETX + 3, ny + 3); ctx.stroke(); }
       ctx.fillStyle = "#222";
-      ctx.fillRect(NETX - 5, TT - 15, 10, 5);
-      ctx.fillRect(NETX - 5, TB + 10, 10, 5);
-      // Schläger unter dem Ball, wenn der Ball tiefer ist, über dem Ball sonst
-      paddle(S.pl, "#c62f3a", -1);
-      paddle(S.cpu, "#1b1b1b", 1);
+      ctx.fillRect(NETX - 5, ny0 - 3, 10, 5);
+      ctx.fillRect(NETX - 5, ny1 - 2, 10, 5);
+      // Schläger
+      var hitWin = S.state === "rally" && S.bounced && b.z <= HITZ + 6;
+      paddle(S.pl, "#c62f3a", -1, hitWin && S.expect === "L");
+      paddle(S.cpu, "#1b1b1b", 1, false);
+      // Spur des Balls (zeigt Kurven und Spin)
+      for (var ti = 0; ti < S.trail.length - 1; ti++) {
+        var tp = S.trail[ti];
+        ctx.fillStyle = ink;
+        ctx.globalAlpha = 0.04 + 0.2 * (ti / S.trail.length);
+        ctx.beginPath(); ctx.arc(tp.x + tp.z * 0.5, tp.y, R * 0.6, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
       // Schatten des Balls: wandert mit der Höhe nach rechts unten
       var sx = b.x - b.z * 0.28, sy = b.y + b.z * 0.28;
-      var onT = onTable(b.x, b.y);
       ctx.fillStyle = "#000";
-      ctx.globalAlpha = onT ? 0.3 : 0.14;
+      ctx.globalAlpha = onTable(b.x, b.y) ? 0.3 : 0.14;
       ctx.beginPath(); ctx.ellipse(sx, sy, R * 0.95, R * 0.8, 0, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
       // Ball: höher = größer und weiter nach oben versetzt
@@ -6017,6 +6102,14 @@ var FigurenArt = (function () {
       ctx.strokeStyle = ink;
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (Math.abs(b.sp) + Math.abs(b.sd) > 0.08) {            // Markierung dreht sich, wenn der Ball Spin hat
+        ctx.strokeStyle = b.sp > 0.08 ? "#d6409f" : b.sp < -0.08 ? "#2447d6" : "#e8b400";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx + Math.cos(b.rot) * br, by + Math.sin(b.rot) * br);
+        ctx.lineTo(bx - Math.cos(b.rot) * br, by - Math.sin(b.rot) * br);
+        ctx.stroke();
+      }
       // Anzeige (ungedreht)
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = ink;
@@ -6067,6 +6160,7 @@ var FigurenArt = (function () {
       if (t === "INPUT" || t === "TEXTAREA" || t === "BUTTON") return;
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (e.type === "keydown" && (k === " " || k === "Enter")) { e.preventDefault(); tryServe(); return; }
+      if (e.type === "keydown" && (k === "1" || k === "2" || k === "3")) { setStroke(["normal", "top", "slice"][Number(k) - 1]); return; }
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "w", "s"].indexOf(k) < 0) return;
       e.preventDefault();
       keys[k] = e.type === "keydown";
@@ -6093,7 +6187,7 @@ var FigurenArt = (function () {
     };
   }
 
-  return { id: "tischtennis", name: "Tischtennis", start: start, _engine: { solve: solve, NETX: NETX, NETH: NETH, R: R, G: G } };
+  return { id: "tischtennis", name: "Tischtennis", start: start, _engine: { plan: plan, simulate: simulate, advance: advance, bounce: bounce, NETX: NETX, NETH: NETH, R: R, G: G } };
 })());
 
 ;
