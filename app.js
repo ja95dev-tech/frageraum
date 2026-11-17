@@ -650,7 +650,7 @@
       return v > 0 ? "Längster Ballwechsel: " + fmtInt(v) : "Noch nicht gespielt";
     } },
     { id: "2048", icon: "🔢", name: "2048", desc: "Zahlen verschmelzen", stat: bestStat("2048-best") },
-    { id: "autorennen", icon: "🏎️", name: "Autorennen", desc: "Hindernissen ausweichen, das Tempo steigt", stat: bestStat("rennen-best") },
+    { id: "autorennen", icon: "🏎️", name: "Autorennen", desc: "Verkehr ausweichen, Münzen und Nitro sammeln", stat: bestStat("rennen-best") },
     { id: "rennstrecke", icon: "🏁", name: "Rennstrecke", desc: "Zeitfahren auf zufälligen Strecken", stat: function () {
       var n = 0;
       try {

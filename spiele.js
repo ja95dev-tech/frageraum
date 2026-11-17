@@ -236,26 +236,43 @@
 
 ;
 // ===== autorennen.js =====
-// Spiel: Autorennen (Hindernissen ausweichen, das Tempo steigt)
+// Spiel: Autorennen (frei lenken, dem Verkehr ausweichen, Münzen, Schild und Nitro sammeln, Tag und Nacht wechseln)
 (window.Spiele = window.Spiele || []).push({
   id: "autorennen",
   name: "Autorennen",
   start: function (box) {
-    var W = 320, H = 480;
-    var LANES = 4, ROAD_X = 20, LANE_W = 70;
+    var W = 360, H = 540;
+    var LANES = 4, ROAD_X = 40, LANE_W = 70, ROAD_W = LANES * LANE_W;
     var CAR_W = 36, CAR_H = 62;
-    var PY = H - 90;
-    var COLORS = ["#e0a800", "#8a949b", "#1aa38f", "#c2185b", "#f2f2f2"];
+    var PY = H - 110;
+    var PHW = 13, PHH = 26;                         // Trefferfläche des Spielerautos (etwas kleiner als das Bild)
+    var BEST_KEY = "rennen-best", COINS_KEY = "rennen-muenzen";
+    var COLORS = ["#e0a800", "#8a949b", "#1aa38f", "#c2185b", "#f2f2f2", "#7a3fc4", "#d9651a"];
+    var PHASE_LEN = 5400;                           // Meter, danach beginnt der Tag von vorn
+    var PHASES = [
+      { at: 0, name: "Morgen", tint: "rgba(255,196,128,0.12)", dark: 0, rain: false },
+      { at: 600, name: "Tag", tint: null, dark: 0, rain: false },
+      { at: 1500, name: "Abend", tint: "rgba(255,110,50,0.18)", dark: 0.12, rain: false },
+      { at: 2500, name: "Nacht", tint: null, dark: 0.62, rain: false },
+      { at: 3800, name: "Regen", tint: "rgba(30,50,90,0.25)", dark: 0.42, rain: true }
+    ];
 
     var canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
     canvas.className = "game-canvas";
-    canvas.style.aspectRatio = "2 / 3";
-    canvas.style.maxWidth = "20rem";
+    canvas.style.aspectRatio = W + " / " + H;
+    canvas.style.maxWidth = "min(100%, 22rem, calc(76vh * " + (W / H).toFixed(3) + "))";
+    canvas.style.touchAction = "none";
+    canvas.tabIndex = 0;
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", "Rennstrecke von oben");
+    canvas.setAttribute("aria-label", "Straße von oben. Du fährst unten und weichst dem Verkehr aus.");
     var ctx = canvas.getContext("2d");
+
+    var night = document.createElement("canvas");
+    night.width = W;
+    night.height = H;
+    var nctx = night.getContext("2d");
 
     var info = document.createElement("p");
     info.className = "msg";
@@ -264,190 +281,691 @@
     var startBtn = document.createElement("button");
     startBtn.type = "button";
     startBtn.textContent = "Start";
+    var pauseBtn = document.createElement("button");
+    pauseBtn.type = "button";
+    pauseBtn.className = "link";
+    pauseBtn.textContent = "Pause";
+    pauseBtn.disabled = true;
 
+    var held = { left: false, right: false, nitro: false };
     var steer = document.createElement("div");
     steer.className = "steer";
-    [["Links", "◀ Links", -1], ["Rechts", "Rechts ▶", 1]].forEach(function (d) {
+    function holdButton(label, text, key) {
       var b = document.createElement("button");
       b.type = "button";
       b.className = "pad-btn";
-      b.textContent = d[1];
-      b.setAttribute("aria-label", d[0]);
-      b.addEventListener("click", function () { move(d[2]); });
+      b.textContent = text;
+      b.setAttribute("aria-label", label);
+      b.style.touchAction = "none";
+      function down(e) { e.preventDefault(); held[key] = true; if (key !== "nitro") wake(); }
+      function up() { held[key] = false; }
+      b.addEventListener("pointerdown", down);
+      b.addEventListener("pointerup", up);
+      b.addEventListener("pointercancel", up);
+      b.addEventListener("pointerleave", up);
+      b.addEventListener("keydown", function (e) { if (e.key === " " || e.key === "Enter") { e.preventDefault(); held[key] = true; } });
+      b.addEventListener("keyup", function (e) { if (e.key === " " || e.key === "Enter") held[key] = false; });
       steer.appendChild(b);
-    });
+      return b;
+    }
+    holdButton("Links lenken", "◀ Links", "left");
+    holdButton("Nitro zünden", "Nitro", "nitro");
+    holdButton("Rechts lenken", "Rechts ▶", "right");
+
+    var help = document.createElement("p");
+    help.className = "hint";
+    help.textContent = "Lenken: Pfeiltasten oder A und D, auf dem Handy die linke oder rechte Bildhälfte gedrückt halten. Nitro: Leertaste. Pause: P. Weiche Autos, Lastern, Pylonen und Ölflecken aus. Münzen bringen Punkte, ein Schild fängt einen Unfall ab, und Nitro-Flaschen füllen den Tank. Wer knapp an Autos vorbeifährt, sammelt Bonuspunkte mit Combo. Mit Nitro bist du kurz unverwundbar und rammst alles weg.";
 
     box.appendChild(canvas);
     var row = document.createElement("div");
     row.className = "row";
     row.appendChild(startBtn);
+    row.appendChild(pauseBtn);
     row.appendChild(info);
     box.appendChild(row);
     box.appendChild(steer);
+    box.appendChild(help);
 
-    var lane, px, enemies, time, dist, offset, spawnIn, running, over, raf, prev;
-    var best = 0;
-    try { best = Number(localStorage.getItem("rennen-best")) || 0; } catch (e) {}
+    var st = null, running = false, over = false, paused = false, raf = null, prev = 0, stopped = false, infoAt = 0;
+    var best = 0, coinsTotal = 0;
+    try { best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch (e) {}
+    try { coinsTotal = Number(localStorage.getItem(COINS_KEY)) || 0; } catch (e) {}
+    var ptrDir = 0;
 
+    function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
     function laneX(l) { return ROAD_X + l * LANE_W + LANE_W / 2; }
-    function score() { return Math.floor(dist / 10); }
-    function scoreText() { return "Punkte: " + score() + " · Rekord: " + best; }
+    function metres() { return st.dist / 12; }
+    function score() { return Math.floor(st.dist / 10 + st.bonus); }
+    function phaseOf(m) {
+      var mm = m % PHASE_LEN, idx = 0;
+      for (var i = 0; i < PHASES.length; i++) if (mm >= PHASES[i].at) idx = i;
+      return idx;
+    }
     function css(name, fallback) {
       var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
       return v || fallback;
     }
+    function hash(i) {
+      var x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+      return x - Math.floor(x);
+    }
 
     function reset() {
-      lane = 1;
-      px = laneX(lane);
-      enemies = [];
-      time = 0;
-      dist = 0;
-      offset = 0;
-      spawnIn = 0.6;
+      st = {
+        x: laneX(1), vx: 0, v: 220, time: 0, dist: 0, bonus: 0, coins: 0, lives: 3, inv: 0, shield: false,
+        nitro: 40, nitroOn: false, combo: 1, comboT: 0, slip: 0, objs: [], parts: [], texts: [],
+        spawnD: 140, itemD: 400, shake: 0, phase: 0, banner: "", bannerT: 0, tilt: 0, rain: [], smashed: 0, near: 0
+      };
       over = false;
     }
 
-    function speed() { return Math.min(220 + time * 7, 520); }
+    // ---------- Verkehr und Gegenstände ----------
+    function level() { return Math.floor(metres() / 400); }
 
-    function spawn() {
-      var l = Math.floor(Math.random() * LANES);
-      var near = enemies.filter(function (e) { return e.y < 160; });
-      if (near.length >= 2 || near.some(function (e) { return e.lane === l; })) return;
-      enemies.push({
-        lane: l,
-        x: laneX(l),
-        y: -CAR_H,
-        rel: 0.5 + Math.random() * 0.35,
-        color: COLORS[Math.floor(Math.random() * COLORS.length)]
-      });
+    function isSolid(o) { return o.kind === "car" || o.kind === "truck" || o.kind === "cone"; }
+
+    function laneBusy(l) {
+      return st.objs.some(function (o) { return isSolid(o) && !o.hit && o.y < 280 && Math.abs(o.x - laneX(l)) < LANE_W / 2; });
     }
+
+    function freeLaneCount() {
+      var n = 0;
+      for (var l = 0; l < LANES; l++) if (!laneBusy(l)) n++;
+      return n;
+    }
+
+    function spawnObstacle() {
+      var lv = level(), r = Math.random() * 100, kind = "car";
+      if (lv >= 1 && r < 12) kind = "truck";
+      else if (r < 30) kind = "cone";
+      else if (lv >= 1 && r < 42) kind = "oil";
+      var l = Math.floor(Math.random() * LANES);
+      if (laneBusy(l) && freeLaneCount() <= 2) return;          // immer mindestens eine Spur frei lassen
+      if (freeLaneCount() <= 1 && kind !== "oil") return;
+      var o = { kind: kind, x: laneX(l), y: 0, vx: 0, sp: 0, hw: 14, hh: 26, hit: false, near: false, rot: 0, color: COLORS[Math.floor(Math.random() * COLORS.length)], lc: 0 };
+      if (kind === "car") { o.sp = 60 + Math.random() * 80; o.y = -40; }
+      if (kind === "truck") { o.sp = 40; o.hw = 17; o.hh = 52; o.y = -70; }
+      if (kind === "cone") { o.hw = 7; o.hh = 7; o.y = -20; }
+      if (kind === "oil") { o.hw = 22; o.hh = 14; o.y = -20; }
+      if (lv >= 2 && kind === "car" && Math.random() < 0.2) o.lc = 0.6 + Math.random();   // wechselt später die Spur
+      st.objs.push(o);
+    }
+
+    function spawnItems() {
+      var l = Math.floor(Math.random() * LANES), r = Math.random();
+      if (laneBusy(l)) return;
+      if (r < 0.14) { st.objs.push({ kind: "shield", x: laneX(l), y: -20, sp: 0, hw: 11, hh: 11, near: true }); return; }
+      if (r < 0.3) { st.objs.push({ kind: "nitro", x: laneX(l), y: -20, sp: 0, hw: 11, hh: 11, near: true }); return; }
+      var n = 4 + Math.floor(Math.random() * 3), zig = Math.random() < 0.4, l2 = clamp(l + (Math.random() < 0.5 ? -1 : 1), 0, LANES - 1);
+      for (var i = 0; i < n; i++) {
+        var lane = zig ? (i < n / 2 ? l : l2) : l;
+        st.objs.push({ kind: "coin", x: laneX(lane), y: -20 - i * 46, sp: 0, hw: 11, hh: 11, near: true, ph: i });
+      }
+    }
+
+    // ---------- Partikel und Texte ----------
+    function burst(x, y, color, n, spd) {
+      for (var i = 0; i < n; i++) {
+        var a = Math.random() * Math.PI * 2, s = (0.4 + Math.random()) * spd;
+        st.parts.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.4 + Math.random() * 0.4, t: 0, c: color, r: 1.5 + Math.random() * 2 });
+      }
+    }
+    function floatText(text, x, y, color) { st.texts.push({ text: text, x: x, y: y, t: 0, c: color || "#ffffff" }); }
+
+    // ---------- Ablauf ----------
+    function wake() { if (!running && !over) begin(); }
 
     function begin() {
       cancelAnimationFrame(raf);
       reset();
       running = true;
+      paused = false;
+      pauseBtn.disabled = false;
+      pauseBtn.textContent = "Pause";
       startBtn.textContent = "Neustart";
-      info.textContent = scoreText();
       prev = performance.now();
       raf = requestAnimationFrame(frame);
+      updateInfo(true);
     }
 
-    function crash() {
-      running = false;
-      over = true;
-      if (score() > best) {
-        best = score();
-        try { localStorage.setItem("rennen-best", String(best)); } catch (e) {}
-      }
-      info.textContent = "Crash! " + scoreText();
+    function togglePause() {
+      if (!running) return;
+      paused = !paused;
+      pauseBtn.textContent = paused ? "Weiter" : "Pause";
+      if (!paused) prev = performance.now();
       draw();
     }
 
-    function move(d) {
-      if (!running) { begin(); return; }
-      lane = Math.max(0, Math.min(LANES - 1, lane + d));
+    function finish() {
+      running = false;
+      over = true;
+      pauseBtn.disabled = true;
+      var s = score();
+      coinsTotal += st.coins;
+      try { localStorage.setItem(COINS_KEY, String(coinsTotal)); } catch (e) {}
+      if (s > best) {
+        best = s;
+        try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
+        st.newBest = true;
+      }
+      updateInfo(true);
+      draw();
+    }
+
+    function updateInfo(force) {
+      var now = performance.now();
+      if (!force && now - infoAt < 400) return;
+      infoAt = now;
+      if (!st) return;
+      var t = "Punkte: " + score() + ". Leben: " + st.lives + ". Münzen: " + st.coins + ". Rekord: " + best + ".";
+      if (over) t = (st.newBest ? "Neuer Rekord! " : "Unfall! ") + t + " Münzen insgesamt: " + coinsTotal + ".";
+      info.textContent = t;
+    }
+
+    function hurt(o) {
+      o.hit = true;
+      o.vx = (o.x >= st.x ? 1 : -1) * (90 + Math.random() * 60);
+      o.rot = (Math.random() < 0.5 ? -1 : 1) * 4;
+      if (st.nitroOn) {
+        st.bonus += 25; st.smashed++;
+        burst(o.x, o.y, o.color || "#f2a31b", 14, 160);
+        floatText("+25", o.x, o.y, "#ffd23f");
+        o.smash = true;
+        return;
+      }
+      if (st.inv > 0) return;
+      if (st.shield) {
+        st.shield = false;
+        st.inv = 1;
+        st.shake = 0.2;
+        burst(st.x, PY, "#5ec8ff", 18, 170);
+        floatText("Schild!", st.x, PY - 40, "#5ec8ff");
+        return;
+      }
+      st.lives--;
+      st.inv = 1.8;
+      st.combo = 1; st.comboT = 0;
+      st.v *= 0.6;
+      st.shake = 0.4;
+      burst((o.x + st.x) / 2, (o.y + PY) / 2, "#ffb347", 22, 200);
+      if (st.lives <= 0) finish();
     }
 
     function update(dt) {
-      time += dt;
-      var v = speed();
-      dist += v * dt;
-      offset = (offset + v * dt) % 40;
-      px += (laneX(lane) - px) * Math.min(1, dt * 14);
+      var s = st;
+      s.time += dt;
+      var m = metres();
+      var lvl = level();
 
-      spawnIn -= dt;
-      if (spawnIn <= 0) {
-        spawn();
-        spawnIn = (170 + Math.random() * 130) / v;
-      }
-      enemies.forEach(function (e) { e.y += v * e.rel * dt; });
-      enemies = enemies.filter(function (e) { return e.y < H + CAR_H; });
+      // Phase wechseln
+      var ph = phaseOf(m);
+      if (ph !== s.phase) { s.phase = ph; s.banner = PHASES[ph].name; s.bannerT = 2.5; }
+      if (s.bannerT > 0) s.bannerT -= dt;
 
-      for (var i = 0; i < enemies.length; i++) {
-        var e = enemies[i];
-        if (Math.abs(e.x - px) < CAR_W - 6 && Math.abs(e.y - PY) < CAR_H - 8) { crash(); return; }
+      // Nitro
+      var wantNitro = held.nitro || s.nitroKey;
+      if (wantNitro && s.nitro > (s.nitroOn ? 0 : 12)) {
+        s.nitroOn = true;
+        s.nitro = Math.max(0, s.nitro - 34 * dt);
+        if (s.nitro <= 0) s.nitroOn = false;
+      } else { s.nitroOn = false; s.nitro = Math.min(100, s.nitro + 3 * dt); }
+
+      // Tempo
+      var base = Math.min(230 + lvl * 32, 520);
+      var tv = base * (s.nitroOn ? 1.45 : 1);
+      s.v += (tv - s.v) * Math.min(1, dt * (s.nitroOn ? 4 : 1.6));
+      s.dist += s.v * dt;
+
+      // Lenken mit Beschleunigung
+      var dir = (held.left || ptrDir < 0 || s.leftKey ? -1 : 0) + (held.right || ptrDir > 0 || s.rightKey ? 1 : 0);
+      if (s.slip > 0) {
+        s.slip -= dt;
+        s.vx += (Math.sin(s.time * 11) * 110 + dir * 380) * dt;     // auf Öl rutscht das Auto
+        s.vx *= Math.exp(-2.2 * dt);
+      } else {
+        s.vx += dir * 1700 * dt;
+        s.vx *= Math.exp(-(dir ? 2.2 : 9) * dt);
       }
-      info.textContent = scoreText();
+      s.vx = clamp(s.vx, -290, 290);
+      s.x += s.vx * dt;
+      var minX = ROAD_X + PHW + 3, maxX = ROAD_X + ROAD_W - PHW - 3;
+      if (s.x < minX) { s.x = minX; if (s.vx < -80) burst(s.x - 10, PY, "#ffd23f", 4, 80); s.vx = Math.abs(s.vx) * 0.3; }
+      if (s.x > maxX) { s.x = maxX; if (s.vx > 80) burst(s.x + 10, PY, "#ffd23f", 4, 80); s.vx = -Math.abs(s.vx) * 0.3; }
+      s.tilt += (clamp(s.vx / 290, -1, 1) * 0.22 - s.tilt) * Math.min(1, dt * 12);
+      if (s.inv > 0) s.inv -= dt;
+      if (s.shake > 0) s.shake -= dt;
+      if (s.comboT > 0) { s.comboT -= dt; if (s.comboT <= 0) s.combo = 1; }
+
+      // Neues auf der Straße
+      s.spawnD -= s.v * dt;
+      if (s.spawnD <= 0) {
+        spawnObstacle();
+        s.spawnD = Math.max(120, 270 - lvl * 14) * (0.8 + Math.random() * 0.5);
+      }
+      s.itemD -= s.v * dt;
+      if (s.itemD <= 0) { spawnItems(); s.itemD = 650 + Math.random() * 500; }
+
+      // Bewegen und Kollidieren
+      for (var i = 0; i < s.objs.length; i++) {
+        var o = s.objs[i];
+        o.y += (s.v - (o.sp || 0)) * dt;
+        if (o.hit) { o.x += o.vx * dt; o.rot2 = (o.rot2 || 0) + o.rot * dt; continue; }
+        if (o.lc > 0 && o.y > 40) {
+          o.lc -= dt;
+          if (o.lc <= 0) {
+            var cur = Math.round((o.x - ROAD_X - LANE_W / 2) / LANE_W), nl = clamp(cur + (Math.random() < 0.5 ? -1 : 1), 0, LANES - 1);
+            o.tx = laneX(nl);
+          }
+        }
+        if (o.tx !== undefined) {
+          var step = 55 * dt;
+          if (Math.abs(o.tx - o.x) <= step) { o.x = o.tx; o.tx = undefined; } else o.x += o.tx > o.x ? step : -step;
+        }
+        var dx = Math.abs(o.x - s.x), dy = Math.abs(o.y - PY);
+        if (o.kind === "coin") {
+          if (dx < 22 && dy < 26) {
+            o.gone = true; s.coins++; s.bonus += 10;
+            burst(o.x, o.y, "#ffd23f", 5, 90);
+          }
+        } else if (o.kind === "shield" || o.kind === "nitro") {
+          if (dx < 24 && dy < 28) {
+            o.gone = true;
+            if (o.kind === "shield") { s.shield = true; floatText("Schild", o.x, o.y, "#5ec8ff"); }
+            else { s.nitro = Math.min(100, s.nitro + 45); floatText("Nitro", o.x, o.y, "#ff9f1c"); }
+            burst(o.x, o.y, o.kind === "shield" ? "#5ec8ff" : "#ff9f1c", 10, 120);
+          }
+        } else if (o.kind === "oil") {
+          if (dx < o.hw + 8 && dy < o.hh + PHH - 10 && s.slip <= 0 && !s.nitroOn) { s.slip = 1.3; floatText("Öl!", s.x, PY - 40, "#bbbbbb"); }
+        } else {
+          if (dx < o.hw + PHW && dy < o.hh + PHH) { hurt(o); if (!running) return; }
+          else if (!o.near && (o.kind === "car" || o.kind === "truck") && dy < o.hh + PHH) {
+            var gap = dx - (o.hw + PHW);
+            if (gap > 0 && gap <= 11) {
+              o.near = true;
+              s.combo = Math.min(5, s.comboT > 0 ? s.combo + 1 : 2);
+              s.comboT = 4;
+              s.near++;
+              var pts = 15 * s.combo;
+              s.bonus += pts;
+              floatText("Knapp! +" + pts, s.x, PY - 50, "#7ee8a2");
+            }
+          }
+        }
+      }
+      s.objs = s.objs.filter(function (o) { return !o.gone && o.y < H + 130 && o.y > -300 && o.x > -80 && o.x < W + 80; });
+
+      // Partikel und Texte
+      s.parts.forEach(function (p) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; });
+      s.parts = s.parts.filter(function (p) { return p.t < p.life; });
+      s.texts.forEach(function (t) { t.t += dt; t.y -= 30 * dt; });
+      s.texts = s.texts.filter(function (t) { return t.t < 1.1; });
+      if (s.nitroOn && Math.random() < 0.9) {
+        s.parts.push({ x: s.x + (Math.random() - 0.5) * 10, y: PY + CAR_H / 2, vx: (Math.random() - 0.5) * 30, vy: 120 + Math.random() * 100, life: 0.3, t: 0, c: Math.random() < 0.5 ? "#ffb703" : "#ff5d2a", r: 3 });
+      }
+      if (PHASES[s.phase].rain) {
+        while (s.rain.length < 60) s.rain.push({ x: Math.random() * W, y: Math.random() * H });
+        s.rain.forEach(function (r) { r.y += 620 * dt; r.x -= 60 * dt; if (r.y > H) { r.y = -10; r.x = Math.random() * (W + 60); } });
+      } else s.rain = [];
+
+      updateInfo(false);
     }
 
-    function drawCar(x, y, color) {
+    // ---------- Zeichnen ----------
+    function rrect(x, y, w, h, r) {
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+    }
+
+    function drawCar(x, y, color, tilt, sparkle) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(tilt || 0);
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      rrect(-CAR_W / 2 + 3, -CAR_H / 2 + 5, CAR_W, CAR_H, 8); ctx.fill();
       ctx.fillStyle = "#111";
-      ctx.fillRect(x - CAR_W / 2 - 3, y - CAR_H / 2 + 8, 6, 14);
-      ctx.fillRect(x + CAR_W / 2 - 3, y - CAR_H / 2 + 8, 6, 14);
-      ctx.fillRect(x - CAR_W / 2 - 3, y + CAR_H / 2 - 22, 6, 14);
-      ctx.fillRect(x + CAR_W / 2 - 3, y + CAR_H / 2 - 22, 6, 14);
+      [[-CAR_W / 2 - 3, -CAR_H / 2 + 8], [CAR_W / 2 - 3, -CAR_H / 2 + 8], [-CAR_W / 2 - 3, CAR_H / 2 - 22], [CAR_W / 2 - 3, CAR_H / 2 - 22]].forEach(function (w) { ctx.fillRect(w[0], w[1], 6, 14); });
       ctx.fillStyle = color;
-      ctx.fillRect(x - CAR_W / 2, y - CAR_H / 2, CAR_W, CAR_H);
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(x - CAR_W / 2 + 5, y - CAR_H / 2 + 12, CAR_W - 10, 14);
-      ctx.fillRect(x - CAR_W / 2 + 5, y + 8, CAR_W - 10, 10);
+      rrect(-CAR_W / 2, -CAR_H / 2, CAR_W, CAR_H, 9); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.2)";
+      rrect(-CAR_W / 2 + 3, -CAR_H / 2 + 3, 8, CAR_H - 6, 4); ctx.fill();
+      ctx.fillStyle = "rgba(15,25,35,0.85)";
+      rrect(-CAR_W / 2 + 6, -CAR_H / 2 + 13, CAR_W - 12, 13, 3); ctx.fill();   // Frontscheibe
+      rrect(-CAR_W / 2 + 6, 6, CAR_W - 12, 9, 3); ctx.fill();                  // Heckscheibe
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.fillRect(-CAR_W / 2 + 6, -CAR_H / 2 + 26, CAR_W - 12, 8);              // Dach
+      ctx.fillStyle = "#fff6c8";
+      ctx.fillRect(-CAR_W / 2 + 3, -CAR_H / 2 + 2, 7, 4);
+      ctx.fillRect(CAR_W / 2 - 10, -CAR_H / 2 + 2, 7, 4);                       // Scheinwerfer
+      ctx.fillStyle = "#e5222d";
+      ctx.fillRect(-CAR_W / 2 + 3, CAR_H / 2 - 5, 8, 3);
+      ctx.fillRect(CAR_W / 2 - 11, CAR_H / 2 - 5, 8, 3);                        // Rücklichter
+      ctx.restore();
+    }
+
+    function drawTruck(o) {
+      var x = o.x, y = o.y, w = 38, h = 108;
+      ctx.save();
+      ctx.translate(x, y);
+      if (o.hit) ctx.rotate(o.rot2 || 0);
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.fillRect(-w / 2 + 3, -h / 2 + 5, w, h);
+      ctx.fillStyle = "#111";
+      [-h / 2 + 12, 4, h / 2 - 18].forEach(function (yy) { ctx.fillRect(-w / 2 - 3, yy, 5, 14); ctx.fillRect(w / 2 - 2, yy, 5, 14); });
+      ctx.fillStyle = "#e9edf0";
+      rrect(-w / 2, -h / 2 + 30, w, h - 30, 4); ctx.fill();                      // Anhänger
+      ctx.fillStyle = o.color;
+      ctx.fillRect(-w / 2, -h / 2 + 52, w, 6);
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(-2, -h / 2 + 30, 4, h - 30);
+      ctx.fillStyle = o.color;
+      rrect(-w / 2 + 1, -h / 2, w - 2, 30, 6); ctx.fill();                       // Fahrerhaus
+      ctx.fillStyle = "rgba(15,25,35,0.85)";
+      rrect(-w / 2 + 6, -h / 2 + 6, w - 12, 10, 3); ctx.fill();
+      ctx.fillStyle = "#fff6c8";
+      ctx.fillRect(-w / 2 + 3, -h / 2 + 1, 6, 4);
+      ctx.fillRect(w / 2 - 9, -h / 2 + 1, 6, 4);
+      ctx.fillStyle = "#e5222d";
+      ctx.fillRect(-w / 2 + 3, h / 2 - 4, 7, 3);
+      ctx.fillRect(w / 2 - 10, h / 2 - 4, 7, 3);
+      ctx.restore();
+    }
+
+    function drawObj(o) {
+      var t = st.time;
+      if (o.kind === "car") {
+        if (o.hit) { ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.rot2 || 0); drawCar(0, 0, o.color, 0); ctx.restore(); }
+        else drawCar(o.x, o.y, o.color, o.tx !== undefined ? (o.tx > o.x ? 0.12 : -0.12) : 0);
+      } else if (o.kind === "truck") drawTruck(o);
+      else if (o.kind === "cone") {
+        ctx.save();
+        ctx.translate(o.x, o.y);
+        if (o.hit) ctx.rotate(o.rot2 || 0);
+        ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.arc(2, 3, 9, 0, 7); ctx.fill();
+        ctx.fillStyle = "#ff7a1a"; ctx.beginPath(); ctx.arc(0, 0, 8, 0, 7); ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, 5, 0, 7); ctx.fill();
+        ctx.fillStyle = "#ff7a1a"; ctx.beginPath(); ctx.arc(0, 0, 2.4, 0, 7); ctx.fill();
+        ctx.restore();
+      } else if (o.kind === "oil") {
+        var g = ctx.createRadialGradient(o.x, o.y, 2, o.x, o.y, 24);
+        g.addColorStop(0, "rgba(10,10,18,0.95)"); g.addColorStop(0.7, "rgba(30,30,50,0.85)"); g.addColorStop(1, "rgba(30,30,50,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.ellipse(o.x, o.y, 26, 16, 0.3, 0, 7); ctx.fill();
+        ctx.strokeStyle = "rgba(120,200,255,0.35)"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(o.x - 3, o.y - 2, 12, 6, 0.3, 0, 7); ctx.stroke();
+      } else if (o.kind === "coin") {
+        var sx = Math.abs(Math.cos(t * 5 + (o.ph || 0)));
+        ctx.fillStyle = "#c98f00"; ctx.beginPath(); ctx.ellipse(o.x, o.y + 1, 10 * Math.max(0.25, sx), 10, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "#ffd23f"; ctx.beginPath(); ctx.ellipse(o.x, o.y, 9 * Math.max(0.25, sx), 9, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.ellipse(o.x - 2, o.y - 3, 2.5 * Math.max(0.25, sx), 3, 0, 0, 7); ctx.fill();
+      } else if (o.kind === "shield") {
+        ctx.fillStyle = "rgba(94,200,255,0.3)"; ctx.beginPath(); ctx.arc(o.x, o.y, 16 + Math.sin(t * 6) * 1.5, 0, 7); ctx.fill();
+        ctx.fillStyle = "#5ec8ff"; ctx.beginPath();
+        ctx.moveTo(o.x, o.y - 11); ctx.lineTo(o.x + 9, o.y - 7); ctx.lineTo(o.x + 7, o.y + 4); ctx.lineTo(o.x, o.y + 11); ctx.lineTo(o.x - 7, o.y + 4); ctx.lineTo(o.x - 9, o.y - 7); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.fillRect(o.x - 1.5, o.y - 7, 3, 12);
+      } else if (o.kind === "nitro") {
+        ctx.fillStyle = "rgba(255,159,28,0.3)"; ctx.beginPath(); ctx.arc(o.x, o.y, 16 + Math.sin(t * 6) * 1.5, 0, 7); ctx.fill();
+        ctx.fillStyle = "#ff9f1c"; rrect(o.x - 6, o.y - 10, 12, 20, 4); ctx.fill();
+        ctx.fillStyle = "#c2410c"; ctx.fillRect(o.x - 3, o.y - 13, 6, 5);
+        ctx.fillStyle = "#fff"; ctx.font = "bold 11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillText("N", o.x, o.y + 4);
+      }
+    }
+
+    function scenery() {
+      var world = st.dist, SP = 70, first = Math.floor((world - H - 100) / SP), last = Math.ceil(world / SP) + 2;
+      for (var i = first; i <= last; i++) {
+        var y = world - i * SP;
+        if (y < -90 || y > H + 90) continue;
+        for (var side = 0; side < 2; side++) {
+          var h = hash(i * 2 + side + 7), cx = side ? ROAD_X + ROAD_W + 20 : ROAD_X - 20, jitter = (hash(i * 3 + side) - 0.5) * 14, yy = y + (hash(i + side * 13) - 0.5) * 30;
+          if (h < 0.45) {                                   // Baum
+            var r = 11 + hash(i + 5 * side) * 6;
+            ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.beginPath(); ctx.arc(cx + jitter + 4, yy + 5, r, 0, 7); ctx.fill();
+            ctx.fillStyle = "#2f7a3a"; ctx.beginPath(); ctx.arc(cx + jitter, yy, r, 0, 7); ctx.fill();
+            ctx.fillStyle = "#47a152"; ctx.beginPath(); ctx.arc(cx + jitter - 3, yy - 3, r * 0.6, 0, 7); ctx.fill();
+          } else if (h < 0.62) {                            // Busch
+            ctx.fillStyle = "#3d8f46"; ctx.beginPath(); ctx.arc(cx + jitter, yy, 7, 0, 7); ctx.fill();
+            ctx.fillStyle = "#e9a3c1"; ctx.beginPath(); ctx.arc(cx + jitter + 2, yy - 2, 2, 0, 7); ctx.fill();
+          } else if (h < 0.76) {                            // Laterne
+            var lx = side ? ROAD_X + ROAD_W + 6 : ROAD_X - 6;
+            ctx.fillStyle = "#555"; ctx.fillRect(lx - 1.5, yy - 1.5, 3, 3);
+            ctx.fillStyle = PHASES[st.phase].dark > 0.3 ? "#ffe9a6" : "#9aa";
+            ctx.beginPath(); ctx.arc(lx + (side ? 6 : -6), yy, 3, 0, 7); ctx.fill();
+          } else if (h < 0.86) {                            // Haus von oben
+            var hx = side ? ROAD_X + ROAD_W + 8 : ROAD_X - 34;
+            ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.fillRect(hx + 3, yy - 14 + 4, 26, 30);
+            ctx.fillStyle = hash(i) < 0.5 ? "#b4543a" : "#6d7d8c"; ctx.fillRect(hx, yy - 14, 26, 30);
+            ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(hx, yy - 14, 26, 7);
+          } else if (h < 0.92) {                            // Schild
+            var sx2 = side ? ROAD_X + ROAD_W + 9 : ROAD_X - 9;
+            ctx.fillStyle = "#555"; ctx.fillRect(sx2 - 1, yy, 2, 8);
+            ctx.fillStyle = "#2a66d9"; ctx.fillRect(sx2 - 8, yy - 8, 16, 9);
+            ctx.fillStyle = "#fff"; ctx.fillRect(sx2 - 5, yy - 5, 10, 2);
+          }
+        }
+      }
+    }
+
+    function hearts() {
+      for (var i = 0; i < 3; i++) {
+        var x = W - 22 - i * 24, y = 24, on = i < st.lives;
+        ctx.fillStyle = on ? "#ff4d6d" : "rgba(255,255,255,0.28)";
+        ctx.beginPath();
+        ctx.moveTo(x, y + 6); ctx.bezierCurveTo(x - 12, y - 3, x - 6, y - 12, x, y - 5); ctx.bezierCurveTo(x + 6, y - 12, x + 12, y - 3, x, y + 6);
+        ctx.fill();
+      }
     }
 
     function draw() {
-      ctx.fillStyle = css("--line", "#c9d5db");
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "#33393f";
-      ctx.fillRect(ROAD_X, 0, LANES * LANE_W, H);
-      ctx.fillStyle = "#f2f2f2";
-      ctx.fillRect(ROAD_X - 3, 0, 3, H);
-      ctx.fillRect(ROAD_X + LANES * LANE_W, 0, 3, H);
-      ctx.fillStyle = "rgba(255,255,255,0.7)";
-      for (var i = 1; i < LANES; i++) {
-        for (var y = -40 + offset; y < H; y += 40) ctx.fillRect(ROAD_X + i * LANE_W - 2, y, 4, 22);
+      if (!st) return;
+      var ph = PHASES[st.phase];
+      ctx.save();
+      if (st.shake > 0) ctx.translate((Math.random() - 0.5) * 8 * st.shake * 2.5, (Math.random() - 0.5) * 8 * st.shake * 2.5);
+      // Boden und Straße
+      ctx.fillStyle = "#4f8f4a";
+      ctx.fillRect(-10, -10, W + 20, H + 20);
+      scenery();
+      ctx.fillStyle = ph.rain ? "#2b3036" : "#383e45";
+      ctx.fillRect(ROAD_X, -10, ROAD_W, H + 20);
+      ctx.fillStyle = "#cfd6da";
+      ctx.fillRect(ROAD_X - 4, -10, 4, H + 20);
+      ctx.fillRect(ROAD_X + ROAD_W, -10, 4, H + 20);
+      var off = st.dist % 40;
+      ctx.fillStyle = "#c62f3a";
+      for (var ry = -40 + (st.dist % 20) * 2; ry < H + 40; ry += 40) {                   // Randstreifen
+        ctx.fillRect(ROAD_X - 4, ry, 4, 20); ctx.fillRect(ROAD_X + ROAD_W, ry, 4, 20);
       }
-      enemies.forEach(function (e) { drawCar(e.x, e.y, e.color); });
-      drawCar(px, PY, css("--accent", "#2447d6"));
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      for (var i = 1; i < LANES; i++) for (var y = -40 + off; y < H; y += 40) ctx.fillRect(ROAD_X + i * LANE_W - 2, y, 4, 22);
+      if (ph.rain) { ctx.fillStyle = "rgba(170,200,230,0.08)"; ctx.fillRect(ROAD_X, 0, ROAD_W, H); }
+      // Geschwindigkeitslinien bei Nitro
+      if (st.nitroOn) {
+        ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 2;
+        for (var k = 0; k < 14; k++) {
+          var lxk = ROAD_X + 8 + hash(k + 1) * (ROAD_W - 16), lyk = ((hash(k + 40) * H + st.time * 900) % (H + 100)) - 50;
+          ctx.beginPath(); ctx.moveTo(lxk, lyk); ctx.lineTo(lxk, lyk + 40); ctx.stroke();
+        }
+      }
+      st.objs.forEach(drawObj);
+      // Spielerauto
+      if (!(st.inv > 0 && Math.floor(st.inv * 12) % 2 === 0 && !st.nitroOn)) drawCar(st.x, PY, css("--accent", "#2447d6"), st.tilt);
+      if (st.shield) {
+        ctx.strokeStyle = "rgba(94,200,255,0.85)"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.ellipse(st.x, PY, 30, 44, 0, 0, 7); ctx.stroke();
+        ctx.fillStyle = "rgba(94,200,255,0.12)"; ctx.fill();
+      }
+      st.parts.forEach(function (p) {
+        ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+        ctx.fillStyle = p.c;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      // Tageszeit
+      if (ph.tint) { ctx.fillStyle = ph.tint; ctx.fillRect(0, 0, W, H); }
+      if (ph.dark > 0) {
+        nctx.globalCompositeOperation = "source-over";
+        nctx.clearRect(0, 0, W, H);
+        nctx.fillStyle = "rgba(4,8,24," + ph.dark + ")";
+        nctx.fillRect(0, 0, W, H);
+        nctx.globalCompositeOperation = "destination-out";
+        function glow(x, y, rx, ry, a) {
+          nctx.save();
+          nctx.translate(x, y);
+          nctx.scale(1, ry / rx);
+          var g = nctx.createRadialGradient(0, 0, 2, 0, 0, rx);
+          g.addColorStop(0, "rgba(0,0,0," + a + ")"); g.addColorStop(1, "rgba(0,0,0,0)");
+          nctx.fillStyle = g;
+          nctx.beginPath(); nctx.arc(0, 0, rx, 0, 7); nctx.fill();
+          nctx.restore();
+        }
+        glow(st.x, PY - 90, 90, 170, 0.95);
+        glow(st.x, PY + 10, 40, 40, 0.5);
+        st.objs.forEach(function (o) { if (o.kind === "car" || o.kind === "truck") glow(o.x, o.y + (o.hh || 26), 30, 24, 0.5); });
+        ctx.drawImage(night, 0, 0);
+      }
+      if (ph.rain) {
+        ctx.strokeStyle = "rgba(200,220,255,0.55)"; ctx.lineWidth = 1;
+        ctx.beginPath();
+        st.rain.forEach(function (r) { ctx.moveTo(r.x, r.y); ctx.lineTo(r.x - 3, r.y + 12); });
+        ctx.stroke();
+      }
+
+      // Anzeigen
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      rrect(8, 8, 124, 44, 8); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 22px system-ui, sans-serif";
+      ctx.fillText(String(score()), 16, 32);
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,0.8)";
+      ctx.fillText("Rekord " + best + "  ·  " + Math.round(metres()) + " m", 16, 46);
+      hearts();
+      if (st.combo > 1) {
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#7ee8a2";
+        ctx.font = "bold 20px system-ui, sans-serif";
+        ctx.fillText("Combo x" + st.combo, W / 2, 80);
+      }
+      // Nitro-Anzeige und Tempo
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      rrect(8, H - 34, W - 16, 26, 8); ctx.fill();
+      ctx.fillStyle = "#ff9f1c";
+      rrect(14, H - 28, Math.max(0, (W - 160) * st.nitro / 100), 14, 5); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1.5;
+      rrect(14, H - 28, W - 160, 14, 5); ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 12px system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(Math.round(st.v * 0.42) + " km/h", W - 14, H - 17);
+      ctx.textAlign = "left";
+      ctx.font = "bold 10px system-ui, sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.fillText("NITRO", 20, H - 17);
+      // Schwebende Texte
+      st.texts.forEach(function (t) {
+        ctx.globalAlpha = Math.max(0, 1 - t.t / 1.1);
+        ctx.fillStyle = t.c;
+        ctx.font = "bold 16px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(t.text, t.x, t.y);
+      });
+      ctx.globalAlpha = 1;
+      if (st.bannerT > 0) {
+        ctx.globalAlpha = Math.min(1, st.bannerT);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 28px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(st.banner, W / 2, 130);
+        ctx.globalAlpha = 1;
+      }
 
       if (!running) {
-        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
         ctx.fillRect(0, 0, W, H);
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = "center";
-        ctx.font = "bold 30px system-ui, sans-serif";
-        ctx.fillText(over ? "Crash!" : "Bereit?", W / 2, H / 2 - 8);
+        ctx.font = "bold 32px system-ui, sans-serif";
+        ctx.fillText(over ? "Unfall!" : paused ? "Pause" : "Bereit?", W / 2, H / 2 - 30);
         ctx.font = "16px system-ui, sans-serif";
-        ctx.fillText(over ? "Start drücken für eine neue Runde" : "Start drücken oder lenken", W / 2, H / 2 + 22);
+        if (over) {
+          ctx.fillText("Punkte: " + score() + (st.newBest ? " (neuer Rekord!)" : ""), W / 2, H / 2 + 2);
+          ctx.fillText("Strecke: " + Math.round(metres()) + " m, Münzen: " + st.coins, W / 2, H / 2 + 26);
+          ctx.fillText("Start drücken für eine neue Runde", W / 2, H / 2 + 58);
+        } else ctx.fillText("Start drücken oder lenken", W / 2, H / 2 + 2);
+      }
+      if (paused && running) {
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.font = "bold 32px system-ui, sans-serif";
+        ctx.fillText("Pause", W / 2, H / 2);
       }
     }
 
     function frame(t) {
-      if (!running) return;
-      var dt = Math.min(0.05, (t - prev) / 1000);
+      if (!running || stopped) return;
+      var dt = Math.min(0.04, (t - prev) / 1000 || 0.016);
       prev = t;
-      update(dt);
-      if (running) { draw(); raf = requestAnimationFrame(frame); }
+      if (!paused && !document.hidden) {
+        // in kleinen Schritten rechnen, damit bei hohem Tempo nichts durch das Auto hindurchfliegt
+        var n = Math.max(1, Math.ceil(dt / 0.012)), h = dt / n;
+        for (var i = 0; i < n && running; i++) update(h);
+      }
+      if (running || over) draw();
+      if (running) raf = requestAnimationFrame(frame);
     }
 
     function onKey(e) {
-      if (!canvas.offsetParent || e.repeat) return;
+      if (!canvas.offsetParent) return;
       var t = e.target && e.target.tagName;
       if (t === "INPUT" || t === "TEXTAREA") return;
-      var d = 0;
-      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") d = -1;
-      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") d = 1;
-      if (!d) return;
-      e.preventDefault();
-      move(d);
+      var down = e.type === "keydown", k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      var handled = true;
+      if (k === "ArrowLeft" || k === "a") { if (st) st.leftKey = down; if (down) wake(); }
+      else if (k === "ArrowRight" || k === "d") { if (st) st.rightKey = down; if (down) wake(); }
+      else if (k === " " && t !== "BUTTON") { if (st) st.nitroKey = down; }
+      else if (k === "p" && down) togglePause();
+      else handled = false;
+      if (handled) e.preventDefault();
     }
 
-    canvas.addEventListener("pointerdown", function (e) {
+    function pointerSteer(e) {
       var rect = canvas.getBoundingClientRect();
-      move(e.clientX - rect.left < rect.width / 2 ? -1 : 1);
+      ptrDir = e.clientX - rect.left < rect.width / 2 ? -1 : 1;
+    }
+    canvas.addEventListener("pointerdown", function (e) {
+      canvas.focus({ preventScroll: true });
+      if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (x) {} }
+      pointerSteer(e);
+      wake();
     });
-    startBtn.addEventListener("click", begin);
+    canvas.addEventListener("pointermove", function (e) { if (ptrDir) pointerSteer(e); });
+    function ptrEnd() { ptrDir = 0; }
+    canvas.addEventListener("pointerup", ptrEnd);
+    canvas.addEventListener("pointercancel", ptrEnd);
+    canvas.addEventListener("lostpointercapture", ptrEnd);
+    startBtn.addEventListener("click", function () { begin(); canvas.focus({ preventScroll: true }); });
+    pauseBtn.addEventListener("click", togglePause);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("keyup", onKey);
     document.addEventListener("farbe-geaendert", draw);
+
+    canvas.__ar = function () { return { st: st, running: running, held: held }; };
 
     reset();
     running = false;
     draw();
-    info.textContent = "Lenke mit den Pfeiltasten (oder A und D). Auf dem Handy: links oder rechts tippen.";
+    info.textContent = "Rekord: " + best + ". Münzen insgesamt: " + coinsTotal + ". Start drücken oder lenken.";
 
     return function stop() {
+      stopped = true;
       cancelAnimationFrame(raf);
       running = false;
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keyup", onKey);
       document.removeEventListener("farbe-geaendert", draw);
     };
   }
@@ -6078,9 +6596,9 @@ var FigurenArt = (function () {
       S = {
         score: { L: 0, R: 0 }, points: 0, state: "serve", server: "L",
         ball: newBall(150, MIDY, 40),
-        pl: { x: 170, y: MIDY, vx: 0, vy: 0, cd: 0 },
-        cpu: { x: 600, y: MIDY, vx: 0, vy: 0, cd: 0, tx: 600, ty: MIDY, plan: false },
-        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, trail: []
+        pl: { x: 170, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 170, oy: MIDY, cd: 0, flash: 0 },
+        cpu: { x: 600, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 600, oy: MIDY, cd: 0, flash: 0, tx: 600, ty: MIDY, plan: false },
+        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, trail: [], pop: null, cord: false
       };
       banner = "";
       prepareServe();
@@ -6134,24 +6652,47 @@ var FigurenArt = (function () {
       banner = "";
     }
 
-    function playerHit() {
+    // Kleiner Hinweis über dem Spielfeld (zum Beispiel "Smash!")
+    function pop(text, x, y) { S.pop = { text: text, x: x, y: y, t: 0.9 }; }
+
+    // Du schlägst den Ball. Der Berührungspunkt (ct) entscheidet über Richtung und Qualität des Schlags:
+    // In der Mitte des Schlägers ist der Schlag sauber, am Rand wird er schwächer und ungenauer ("Kantenball"),
+    // und ein Ball hinter dem Schläger wird nur noch hochgeschoben. Tempo, Schlaghöhe und Schlägerbewegung geben Wucht.
+    function playerHit(ct) {
       var b = S.ball, p = S.pl;
-      var dy = clamp((b.y - p.y) / (PR + R), -1, 1);           // wo der Ball den Schläger trifft
-      var forward = clamp(p.vx / 520, 0, 1) + clamp(Math.abs(p.vy) / 900, 0, 0.3);
-      var speed = clamp(forward, 0, 1);
-      var xt = NETX + 70 + 160 * speed;
-      var yt = MIDY + dy * 115;                                // weg vom Schlägermittelpunkt
+      var core = PR + R, d = Math.sqrt(ct.rx * ct.rx + ct.ry * ct.ry);
+      var q = d <= core ? 1 : 1 - 0.45 * clamp((d - core) / (PREACH - core), 0, 1);
+      var behind = ct.rx < -core * 0.6;                           // Ball hinter der Schlägermitte
+      if (behind) q *= 0.75;
+      var incoming = clamp(Math.sqrt(b.vx * b.vx + b.vy * b.vy) / 1000, 0, 1) * 0.15;
+      var power = clamp(clamp(p.sx / 520, 0, 1) + clamp(Math.abs(p.sy) / 900, 0, 0.3) + incoming, 0, 1);
+      var smash = b.z >= 30 && p.sx > 260 && q > 0.8;             // hoher Ball und schneller Schlag nach vorn
+      if (smash) power = clamp(power + 0.25, 0, 1);
+      var xt = NETX + 60 + 175 * power * (0.6 + 0.4 * q);
+      var slope = clamp(ct.ry / PREACH * 0.9, -0.5, 0.5);         // seitlich getroffen: schräger Schlag
+      var raw = b.y + slope * (xt - b.x) + p.sy * 0.1;
+      var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.55; // leichte Hilfe, den Ball auf die Platte zu bringen
+      yt += (1 - q) * 70 * (Math.random() * 2 - 1);
+      xt += (1 - q) * 40 * (Math.random() * 2 - 1);
       var sp = STROKES[strokeId][1];
-      var sd = clamp(p.vy / 650, -1, 1) * 0.9;                 // Seitwärtsbewegung gibt Seitenspin
+      if (behind) sp = Math.min(sp, 0);
+      var sd = clamp(p.sy / 650, -1, 1) * 0.9;                    // Seitwärtsbewegung gibt Seitenspin
       if (Math.abs(sd) < 0.12) sd = 0;
-      launch(b, plan(b.x, b.y, b.z, xt, yt, 0.74 - 0.24 * speed, sp, sd), sp, sd);
+      var T = Math.max(0.42, 0.74 - 0.24 * power - (smash ? 0.1 : 0));
+      launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("L");
       p.cd = 0.2;
+      p.flash = 0.18;
+      if (smash) pop("Smash!", p.x, p.y);
+      else if (q < 0.7) pop("Kantenball", p.x, p.y);
+      else if (behind) pop("Zu spät", p.x, p.y);
     }
 
-    function cpuHit() {
+    function cpuHit(ct) {
       var b = S.ball, c = S.cpu, lv = LEVELS[levelId];
-      var yt = (S.pl.y < MIDY ? MIDY + 80 : MIDY - 80) + (Math.random() - 0.5) * 70 + (Math.random() - 0.5) * 2 * lv.err;
+      var core = PR + R, d = Math.sqrt(ct.rx * ct.rx + ct.ry * ct.ry);
+      var q = d <= core ? 1 : 1 - 0.5 * clamp((d - core) / (REACH - core), 0, 1);
+      var yt = (S.pl.y < MIDY ? MIDY + 80 : MIDY - 80) + (Math.random() - 0.5) * 70 + (Math.random() - 0.5) * 2 * lv.err + (1 - q) * 60 * (Math.random() * 2 - 1);
       var xt = TL + 30 + Math.random() * 200;
       var T = 0.62 + Math.random() * 0.16;
       var sp = 0, sd = 0;
@@ -6161,6 +6702,7 @@ var FigurenArt = (function () {
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("R");
       c.cd = 0.2;
+      c.flash = 0.18;
       c.plan = false;
     }
 
@@ -6168,6 +6710,7 @@ var FigurenArt = (function () {
       S.last = side;
       S.expect = side === "L" ? "R" : "L";
       S.bounced = false;
+      S.cord = false;
       S.rally++;
       if (S.rally > S.longest) S.longest = S.rally;
       updateText();
@@ -6269,13 +6812,22 @@ var FigurenArt = (function () {
       p.x += (target.x - p.x) * f;
       p.y += (target.y - p.y) * f;
       p.vx = (p.x - ox) / dt; p.vy = (p.y - oy) / dt;
+      var ea = 1 - Math.exp(-dt / 0.05);                      // geglättetes Tempo (Maus-Zittern zählt kaum)
+      p.sx += (p.vx - p.sx) * ea; p.sy += (p.vy - p.sy) * ea;
     }
 
-    // Trifft der Ball den Schläger? Die ganze Strecke des Balls seit dem letzten Schritt zählt, damit schnelle Bälle nicht hindurchfliegen.
+    // Trifft der Ball den Schläger? Es zählt die Bewegung des Balls relativ zum Schläger seit dem letzten Schritt,
+    // damit weder schnelle Bälle noch schnelle Schläger durcheinander hindurchfliegen.
+    // Gibt den Berührungspunkt relativ zur Schlägermitte zurück (oder null).
     function hits(pad, px, py, pz) {
       var b = S.ball;
+      if (Math.min(pz, b.z) > HITZ) return null;
       var rr = pad === S.pl ? PREACH : REACH;
-      return Math.min(pz, b.z) <= HITZ && segDist2(px, py, b.x, b.y, pad.x, pad.y) <= rr * rr;
+      var ax = px - pad.ox, ay = py - pad.oy, bx = b.x - pad.x, by = b.y - pad.y;
+      if (segDist2(ax, ay, bx, by, 0, 0) > rr * rr) return null;
+      var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+      var u = l2 ? clamp(-(ax * dx + ay * dy) / l2, 0, 1) : 1;          // Zeitpunkt der größten Annäherung
+      return { rx: ax + dx * u, ry: ay + dy * u, z: pz + (b.z - pz) * u };
     }
 
     function stepBall(dt) {
@@ -6284,7 +6836,13 @@ var FigurenArt = (function () {
       b.rot += (b.sp * 11 + b.sd * 9) * dt;
 
       // Netz: beim Überqueren der Mitte muss der Ball hoch genug sein
-      if ((px < NETX) !== (b.x < NETX) && b.y > TT - NETEXT && b.y < TB + NETEXT && b.z < NETH + R * 0.4) { fault("Netz"); return; }
+      if ((px < NETX) !== (b.x < NETX) && b.y > TT - NETEXT && b.y < TB + NETEXT && b.z < NETH + R * 0.4) {
+        if (b.z > NETH - 5 && !S.cord) {               // Netzroller: der Ball streift die Netzkante und trudelt weiter
+          S.cord = true;
+          b.vx *= 0.5; b.vz = Math.max(b.vz, 0) + 80; b.vy += (Math.random() - 0.5) * 160; b.sp *= 0.5; b.sd *= 0.5;
+          pop("Netzroller!", b.x, b.y);
+        } else { fault("Netz"); return; }
+      }
 
       if (b.z <= 0 && b.vz < 0) {
         if (onTable(b.x, b.y)) {
@@ -6296,8 +6854,9 @@ var FigurenArt = (function () {
       if (b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) { outOfPlay(); return; }
 
       // Geschlagen wird erst, nachdem der Ball auf der eigenen Seite aufgesprungen ist
-      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && hits(S.pl, px, py, pz)) playerHit();
-      else if (S.bounced && S.expect === "R" && S.cpu.cd <= 0 && hits(S.cpu, px, py, pz)) cpuHit();
+      var ct;
+      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && (ct = hits(S.pl, px, py, pz))) playerHit(ct);
+      else if (S.bounced && S.expect === "R" && S.cpu.cd <= 0 && (ct = hits(S.cpu, px, py, pz))) cpuHit(ct);
     }
 
     function frame(t) {
@@ -6307,9 +6866,12 @@ var FigurenArt = (function () {
       if (!document.hidden) {
         var sub = 4, h = dt / sub;
         for (var i = 0; i < sub; i++) {
+          S.pl.ox = S.pl.x; S.pl.oy = S.pl.y; S.cpu.ox = S.cpu.x; S.cpu.oy = S.cpu.y;
           movePlayer(h);
           moveCpu(h);
           S.pl.cd -= h; S.cpu.cd -= h;
+          S.pl.flash -= h; S.cpu.flash -= h;
+          if (S.pop) { S.pop.t -= h; if (S.pop.t <= 0) S.pop = null; }
           if (S.state === "rally") stepBall(h);
         }
         if (S.state === "rally" || S.state === "point") {
@@ -6334,6 +6896,11 @@ var FigurenArt = (function () {
       ctx.beginPath(); ctx.arc(p.x, p.y, PR - 3, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "rgba(255,255,255,0.18)";
       ctx.beginPath(); ctx.arc(p.x + 5, p.y - 4, PR * 0.45, 0, Math.PI * 2); ctx.fill();
+      if (p.flash > 0) {                              // Aufleuchten beim Treffer
+        ctx.strokeStyle = "rgba(255,255,255," + (p.flash / 0.18).toFixed(2) + ")";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, PR + (0.18 - p.flash) * 120, 0, Math.PI * 2); ctx.stroke();
+      }
       if (active) {                                   // Ring: jetzt kann der Ball getroffen werden
         ctx.strokeStyle = "#ffd23f";
         ctx.lineWidth = 3;
@@ -6415,6 +6982,14 @@ var FigurenArt = (function () {
       }
       // Anzeige (ungedreht)
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (S.pop) {
+        ctx.globalAlpha = clamp(S.pop.t / 0.4, 0, 1);
+        ctx.fillStyle = ink;
+        ctx.font = "700 20px Georgia, serif";
+        ctx.textAlign = "center";
+        ctx.fillText(S.pop.text, clamp(S.pop.y, 50, H - 50), W - S.pop.x - 34 - (0.9 - S.pop.t) * 30);
+        ctx.globalAlpha = 1;
+      }
       ctx.fillStyle = ink;
       ctx.font = "700 28px Georgia, serif";
       ctx.textAlign = "left";
