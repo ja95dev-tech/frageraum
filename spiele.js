@@ -6429,7 +6429,6 @@ var FigurenArt = (function () {
     mittel: { name: "Mittel", speed: 370, err: 34, slip: 0.12, react: 0.3, spin: 0.35 },
     schwer: { name: "Schwer", speed: 520, err: 14, slip: 0.04, react: 0.1, spin: 0.6 }
   };
-  var STROKES = { normal: ["Normal", 0], top: ["Topspin", 0.9], slice: ["Unterschnitt", -0.9] };
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
@@ -6489,6 +6488,22 @@ var FigurenArt = (function () {
     return v;
   }
 
+  // Der Spin entsteht aus der Schlägerbewegung, nicht aus einer Auswahl:
+  // - früh und hoch getroffen, mit schnellem Schlag nach vorn: Topspin
+  // - spät und tief getroffen oder den Schläger nach hinten ziehen: Unterschnitt
+  // - Schläger beim Treffer seitlich bewegt: Seitenspin
+  // Je schneller der Schläger, desto mehr Drall.
+  function computeSpin(p, ct) {
+    var core = PR + R;
+    var f = clamp(Math.sqrt(p.sx * p.sx + p.sy * p.sy) / 600, 0.15, 1);
+    var h = clamp((ct.z - 22) / 24, -1, 1);
+    var sp = clamp(h * (0.3 + 0.7 * f) + clamp(p.sx / 700, -0.5, 0.5), -1, 1);
+    var sd = clamp(clamp(p.sy / 650, -1, 1) * 0.9 + clamp(ct.ry / core, -1, 1) * 0.25 * f, -1, 1);
+    if (Math.abs(sp) < 0.1) sp = 0;
+    if (Math.abs(sd) < 0.12) sd = 0;
+    return { sp: sp, sd: sd };
+  }
+
   function segDist2(ax, ay, bx, by, cx, cy) {
     var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, t = l2 ? clamp(((cx - ax) * dx + (cy - ay) * dy) / l2, 0, 1) : 0;
     var qx = ax + dx * t - cx, qy = ay + dy * t - cy;
@@ -6530,7 +6545,7 @@ var FigurenArt = (function () {
       };
     }
 
-    var levelId = "mittel", strokeId = "normal";
+    var levelId = "mittel", aim = 0;            // aim: Aufschlagwinkel in Bogenmaß
     try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
 
     var levelNames = {};
@@ -6543,15 +6558,6 @@ var FigurenArt = (function () {
     });
     levelGroup.mark(levelId);
 
-    var strokeNames = {};
-    Object.keys(STROKES).forEach(function (id) { strokeNames[id] = STROKES[id][0]; });
-    var strokeGroup = chipGroup("Schlagart (Tasten 1, 2, 3)", strokeNames, function (id) { setStroke(id); });
-    strokeGroup.mark(strokeId);
-    function setStroke(id) {
-      strokeId = id;
-      strokeGroup.mark(id);
-    }
-
     var info = document.createElement("p");
     info.className = "msg";
     info.setAttribute("aria-live", "polite");
@@ -6563,13 +6569,42 @@ var FigurenArt = (function () {
     row.appendChild(startBtn);
     row.appendChild(info);
 
+    var aimRow = document.createElement("div");
+    aimRow.className = "steer";
+    aimRow.style.maxWidth = "min(100%, 24rem)";
+    aimRow.style.alignItems = "center";
+    var aimLeft = document.createElement("button");
+    aimLeft.type = "button"; aimLeft.className = "pad-btn"; aimLeft.textContent = "◀ Drehen";
+    aimLeft.setAttribute("aria-label", "Aufschlag nach links drehen");
+    var aimText = document.createElement("span");
+    aimText.className = "msg";
+    aimText.style.flex = "1";
+    aimText.style.textAlign = "center";
+    var aimRight = document.createElement("button");
+    aimRight.type = "button"; aimRight.className = "pad-btn"; aimRight.textContent = "Drehen ▶";
+    aimRight.setAttribute("aria-label", "Aufschlag nach rechts drehen");
+    aimRow.appendChild(aimLeft); aimRow.appendChild(aimText); aimRow.appendChild(aimRight);
+    function turnAim(dir, deg) {
+      aim = clamp(aim + dir * (deg || 3) * Math.PI / 180, -35 * Math.PI / 180, 35 * Math.PI / 180);
+      if (Math.abs(aim) < 0.005) aim = 0;
+      showAim();
+      if (S && S.state) { S.previewAt = 0; }
+    }
+    function showAim() {
+      var d = Math.round(aim * 180 / Math.PI);
+      aimText.textContent = "Aufschlagwinkel: " + (d === 0 ? "gerade" : (d > 0 ? d + "° nach rechts" : -d + "° nach links"));
+    }
+    aimLeft.addEventListener("click", function () { turnAim(-1, 5); canvas.focus({ preventScroll: true }); });
+    aimRight.addEventListener("click", function () { turnAim(1, 5); canvas.focus({ preventScroll: true }); });
+    showAim();
+
     var help = document.createElement("p");
     help.className = "hint";
-    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn mit dem Schläger, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt, wenn du den Ball in der Mitte triffst. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin: Topspin (Taste 2) lässt den Ball nach dem Aufsprung nach vorn springen, Unterschnitt (Taste 3) macht ihn kurz und hoch. Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen.";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen.";
 
     box.appendChild(levelGroup.el);
-    box.appendChild(strokeGroup.el);
     box.appendChild(canvas);
+    box.appendChild(aimRow);
     box.appendChild(row);
     box.appendChild(help);
 
@@ -6652,15 +6687,13 @@ var FigurenArt = (function () {
       var power = clamp(clamp(p.sx / 520, 0, 1) + clamp(Math.abs(p.sy) / 900, 0, 0.3), 0, 1);
       var mix = 0.7 + 0.3 * q;
       var x1 = TL + 100 + 130 * power * mix;                         // erster Aufsprung auf deiner Hälfte
-      var slope = clamp(ct.ry / PREACH * 0.9, -0.5, 0.5);
+      var slope = clamp(ct.ry / PREACH * 0.9 + Math.tan(aim), -0.85, 0.85);   // Aufschlagwinkel (drehbar) und Treffpunkt
       var y1 = clamp(b.y + slope * (x1 - b.x) + p.sy * 0.05, TT + 14, TB - 14);
       var xt2 = NETX + 50 + 190 * power * mix;                       // zweiter Aufsprung beim Gegner
       var raw = b.y + slope * (xt2 - b.x) * 0.9 + p.sy * 0.1;
       var yt2 = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.55 + (1 - q) * 60 * (Math.random() * 2 - 1);
       xt2 += (1 - q) * 30 * (Math.random() * 2 - 1);
-      var sp = STROKES[strokeId][1];
-      var sd = clamp(p.sy / 650, -1, 1) * 0.9;
-      if (Math.abs(sd) < 0.12) sd = 0;
+      var spin = computeSpin(p, ct), sp = spin.sp, sd = spin.sd;
       var T1 = 0.5 - 0.1 * power;
       return { v1: plan(b.x, b.y, b.z, x1, y1, T1, sp, sd), xt2: xt2, yt2: yt2, T2: 0.62 - 0.14 * power, sp: sp, sd: sd, q: q, power: power };
     }
@@ -6733,7 +6766,7 @@ var FigurenArt = (function () {
     function computePreview() {
       var b = S.ball, p = S.pl;
       var probe = { x: b.x, y: b.y, z: S.state === "toss" ? clamp(b.z, 8, 34) : 34 };
-      var sol = serveSolveL(probe, { rx: 0, ry: 0 }, p);
+      var sol = serveSolveL(probe, { rx: 0, ry: 0, z: probe.z }, p);
       var c = { x: probe.x, y: probe.y, z: probe.z, vx: sol.v1.vx, vy: sol.v1.vy, vz: sol.v1.vz, sp: sol.sp, sd: sol.sd };
       var pts = [], leg = 1, dt = 1 / 60;
       for (var i = 0; i < 240; i++) {
@@ -6774,10 +6807,8 @@ var FigurenArt = (function () {
       var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.55; // leichte Hilfe, den Ball auf die Platte zu bringen
       yt += (1 - q) * 70 * (Math.random() * 2 - 1);
       xt += (1 - q) * 40 * (Math.random() * 2 - 1);
-      var sp = STROKES[strokeId][1];
-      if (behind) sp = Math.min(sp, 0);
-      var sd = clamp(p.sy / 650, -1, 1) * 0.9;                    // Seitwärtsbewegung gibt Seitenspin
-      if (Math.abs(sd) < 0.12) sd = 0;
+      var spin = computeSpin(p, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
+      if (behind) sp = Math.min(sp, -0.2);
       var T = Math.max(0.42, 0.74 - 0.24 * power - (smash ? 0.1 : 0));
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("L");
@@ -6786,6 +6817,9 @@ var FigurenArt = (function () {
       if (smash) pop("Smash!", p.x, p.y);
       else if (q < 0.7) pop("Kantenball", p.x, p.y);
       else if (behind) pop("Zu spät", p.x, p.y);
+      else if (sp > 0.45) pop("Topspin", p.x, p.y);
+      else if (sp < -0.45) pop("Unterschnitt", p.x, p.y);
+      else if (Math.abs(sd) > 0.45) pop("Seitenspin", p.x, p.y);
     }
 
     function cpuHit(ct) {
@@ -7114,6 +7148,19 @@ var FigurenArt = (function () {
         ctx.beginPath(); ctx.arc(tp.x + tp.z * 0.5, tp.y, R * 0.6, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
+      // Aufschlagrichtung: Pfeil am Ball, drehbar
+      if (S.server === "L" && (S.state === "serve" || S.state === "toss")) {
+        var ax0 = b.x + b.z * 0.5, ay0 = b.y, ca = Math.cos(aim), sa = Math.sin(aim);
+        ctx.strokeStyle = "#ffd23f";
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(ax0 + ca * 16, ay0 + sa * 16); ctx.lineTo(ax0 + ca * 58, ay0 + sa * 58);
+        ctx.moveTo(ax0 + ca * 58, ay0 + sa * 58); ctx.lineTo(ax0 + Math.cos(aim + 2.6) * 10 + ca * 58, ay0 + Math.sin(aim + 2.6) * 10 + sa * 58);
+        ctx.moveTo(ax0 + ca * 58, ay0 + sa * 58); ctx.lineTo(ax0 + Math.cos(aim - 2.6) * 10 + ca * 58, ay0 + Math.sin(aim - 2.6) * 10 + sa * 58);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       // Aufschlag-Vorschau: gepunktete Flugbahn mit Aufsprung auf deiner Seite und Landepunkt beim Gegner
       if (S.preview && S.preview.length) {
         ctx.fillStyle = ink;
@@ -7193,6 +7240,11 @@ var FigurenArt = (function () {
       if (S.state === "serve" && S.server === "L" && !S.over) toss();
     }
 
+    canvas.addEventListener("wheel", function (e) {
+      if (S.state !== "serve" && S.state !== "toss") return;
+      e.preventDefault();
+      turnAim(e.deltaY > 0 ? 1 : -1, 3);
+    }, { passive: false });
     canvas.addEventListener("pointermove", function (e) {
       var p = canvasPoint(e);
       target.x = p.x; target.y = p.y;
@@ -7210,7 +7262,7 @@ var FigurenArt = (function () {
       if (t === "INPUT" || t === "TEXTAREA" || t === "BUTTON") return;
       var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (e.type === "keydown" && (k === " " || k === "Enter")) { e.preventDefault(); tryServe(); return; }
-      if (e.type === "keydown" && (k === "1" || k === "2" || k === "3")) { setStroke(["normal", "top", "slice"][Number(k) - 1]); return; }
+      if (e.type === "keydown" && (k === "q" || k === "e")) { turnAim(k === "q" ? -1 : 1); return; }
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d", "w", "s"].indexOf(k) < 0) return;
       e.preventDefault();
       keys[k] = e.type === "keydown";
