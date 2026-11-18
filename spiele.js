@@ -6531,8 +6531,10 @@ var FigurenArt = (function () {
   var BALLVIS = 1.4;                          // Der Ball wird größer gezeichnet
   var HITZ = 56;                              // bis zu dieser Höhe kann der Ball getroffen werden
   var MIDY = (TT + TB) / 2;
-  var SIDE = 130;                              // so weit darfst du seitlich über die Plattenkante hinaus laufen
+  var SIDE = 220;                             // so weit darfst du seitlich über die Plattenkante hinaus laufen
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
+  var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
+  var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
   var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level";
 
   var LEVELS = {
@@ -6625,7 +6627,22 @@ var FigurenArt = (function () {
 
   function onTable(x, y) { return x >= TL && x <= TR && y >= TT && y <= TB; }
 
+  var TT_CSS =
+    ".tt-lobby{max-width:30rem;margin:0 0 1rem}" +
+    ".tt-lobby p{margin:0 0 0.8rem}" +
+    ".tt-lobby .row{margin:0.4rem 0 1rem;align-items:center}" +
+    ".tt-lobby input[type=text]{width:9rem;font:600 1.4rem/1.2 var(--serif,Georgia,serif);letter-spacing:0.25em;text-transform:uppercase;text-align:center}" +
+    ".tt-bar{margin:0 0 0.8rem}" +
+    ".tt-code{display:inline-block;font:700 1.9rem/1.2 var(--serif,Georgia,serif);letter-spacing:0.3em;padding:0.1em 0.35em 0.1em 0.5em;border:2px dashed var(--accent);border-radius:0.5rem;margin:0.2rem 0.8rem 0.4rem 0}" +
+    ".tt-bar .row{margin:0.4rem 0 0}";
+
   function start(box) {
+    if (!document.getElementById("tt-style")) {
+      var st = document.createElement("style");
+      st.id = "tt-style";
+      st.textContent = TT_CSS;
+      document.head.appendChild(st);
+    }
     var canvas = document.createElement("canvas");
     canvas.width = 840;                       // 3D-Ansicht von hinten (hochkant)
     canvas.height = 640;
@@ -6658,6 +6675,7 @@ var FigurenArt = (function () {
       };
     }
 
+    var online = false, net = null;            // online: gegen ein anderes Gerät mit Code
     var levelId = "mittel", aim = 0;            // aim: Aufschlagwinkel in Bogenmaß
     try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
 
@@ -6713,9 +6731,71 @@ var FigurenArt = (function () {
 
     var help = document.createElement("p");
     help.className = "hint";
-    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen.";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Online: Eine Person erstellt eine Partie und schickt den Code, die andere gibt ihn ein. Beide sehen sich selbst unten. Wer den Ball zuletzt gespielt hat, wartet auf die Entscheidung des Gegners.";
 
+    var modeGroup = chipGroup("Spielmodus", { cpu: "Gegen den Computer", online: "Online mit Code" }, function (id) { setMode(id); });
+    modeGroup.mark("cpu");
+
+    var lobby = document.createElement("div");
+    lobby.className = "tt-lobby";
+    lobby.hidden = true;
+    var lobbyIntro = document.createElement("p");
+    lobbyIntro.textContent = "Spiele gegen jemanden auf einem anderen Gerät. Eine Person erstellt eine Partie und schickt den Code. Die andere Person gibt den Code ein. Der Ersteller schlägt zuerst auf.";
+    lobby.appendChild(lobbyIntro);
+    var createRow = document.createElement("div");
+    createRow.className = "row";
+    var createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.textContent = "Partie erstellen";
+    createRow.appendChild(createBtn);
+    lobby.appendChild(createRow);
+    var joinLabel = document.createElement("label");
+    joinLabel.htmlFor = "tt-code-in";
+    joinLabel.textContent = "Oder Code von deinem Gegner eingeben";
+    lobby.appendChild(joinLabel);
+    var joinRow = document.createElement("div");
+    joinRow.className = "row";
+    var codeIn = document.createElement("input");
+    codeIn.type = "text";
+    codeIn.id = "tt-code-in";
+    codeIn.maxLength = 5;
+    codeIn.autocomplete = "off";
+    codeIn.setAttribute("autocapitalize", "characters");
+    codeIn.setAttribute("spellcheck", "false");
+    var joinBtn = document.createElement("button");
+    joinBtn.type = "button";
+    joinBtn.textContent = "Beitreten";
+    joinRow.appendChild(codeIn);
+    joinRow.appendChild(joinBtn);
+    lobby.appendChild(joinRow);
+    var lobbyMsg = document.createElement("p");
+    lobbyMsg.className = "msg";
+    lobbyMsg.setAttribute("role", "status");
+    lobby.appendChild(lobbyMsg);
+
+    var bar = document.createElement("div");
+    bar.className = "tt-bar";
+    bar.hidden = true;
+    var codeShow = document.createElement("span");
+    codeShow.className = "tt-code";
+    var barRow = document.createElement("div");
+    barRow.className = "row";
+    var copyBtn = document.createElement("button");
+    copyBtn.type = "button"; copyBtn.className = "link"; copyBtn.textContent = "Code kopieren";
+    copyBtn.addEventListener("click", function () {
+      var done = function (ok) { copyBtn.textContent = ok ? "Kopiert" : "Code markieren und kopieren"; };
+      try { navigator.clipboard.writeText(net.code).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
+    });
+    var leaveBtn = document.createElement("button");
+    leaveBtn.type = "button"; leaveBtn.className = "link"; leaveBtn.textContent = "Partie verlassen";
+    leaveBtn.addEventListener("click", function () { leaveNet(); showView(); newMatch(); });
+    barRow.appendChild(copyBtn); barRow.appendChild(leaveBtn);
+    bar.appendChild(codeShow); bar.appendChild(barRow);
+
+    box.appendChild(modeGroup.el);
     box.appendChild(levelGroup.el);
+    box.appendChild(lobby);
+    box.appendChild(bar);
     box.appendChild(canvas);
     box.appendChild(aimRow);
     box.appendChild(row);
@@ -6737,6 +6817,7 @@ var FigurenArt = (function () {
     }
 
     function say(t) { info.textContent = t; }
+    function oppName() { return online ? "Gegner" : "Computer"; }
 
     function newBall(x, y, z) { return { x: x, y: y, z: z, vx: 0, vy: 0, vz: 0, sp: 0, sd: 0, rot: 0 }; }
 
@@ -6747,16 +6828,18 @@ var FigurenArt = (function () {
         ball: newBall(150, MIDY, 40),
         pl: { x: 170, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 170, oy: MIDY, cd: 0, flash: 0 },
         cpu: { x: 600, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 600, oy: MIDY, cd: 0, flash: 0, tx: 600, ty: MIDY, plan: false },
-        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, trail: [], pop: null, cord: false, serveLeg: 0, serve2: null, preview: null, previewAt: 0
+        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, frozen: false, pend: null, rng: null, trail: [], pop: null, cord: false, serveLeg: 0, serve2: null, preview: null, previewAt: 0
       };
       banner = "";
       prepareServe();
       updateText();
+      showView();
     }
 
     function serverFor(points) {
-      if (points < 20) return Math.floor(points / 2) % 2 === 0 ? "L" : "R";
-      return points % 2 === 0 ? "L" : "R";
+      var s = points < 20 ? (Math.floor(points / 2) % 2 === 0 ? "L" : "R") : (points % 2 === 0 ? "L" : "R");
+      if (online && net && !net.host) s = s === "L" ? "R" : "L";        // der Gast schlägt als Zweiter auf
+      return s;
     }
 
     function prepareServe() {
@@ -6770,18 +6853,283 @@ var FigurenArt = (function () {
       S.ball = newBall(S.server === "L" ? S.pl.x + PR + 10 : 610, S.server === "L" ? S.pl.y : MIDY, S.server === "L" ? 34 : 40);
       S.serveLeg = 0;
       S.preview = null;
+      S.frozen = false; S.pend = null;
       S.cpu.plan = false;
       S.serveAt = performance.now() + 900;
-      banner = S.server === "L" ? "Dein Aufschlag: Leertaste/Tippen wirft hoch" : "Aufschlag Computer";
+      banner = S.server === "L" ? "Dein Aufschlag: Leertaste/Tippen wirft hoch" : "Aufschlag " + (online ? "Gegner" : "Computer");
+      if (waiting()) banner = waitBanner();
       updateText();
     }
 
     function updateText() {
-      var t = "Du " + S.score.L + " : " + S.score.R + " Computer";
-      if (S.over) t += S.score.L > S.score.R ? ". Du hast gewonnen" : ". Der Computer hat gewonnen";
+      var t = "Du " + S.score.L + " : " + S.score.R + " " + oppName();
+      if (S.over) t += S.score.L > S.score.R ? ". Du hast gewonnen" : (online ? ". Dein Gegner hat gewonnen" : ". Der Computer hat gewonnen");
       else if (S.rally > 1) t += ". Ballwechsel: " + S.rally;
       t += ". Rekord: längster Ballwechsel " + best + ".";
+      if (online && net && net.players === 2 && !net.opp && !net.left) t += " Die Verbindung zum Gegner ist unterbrochen.";
       say(t);
+    }
+
+    // ---------- Online ----------
+    // Jedes Gerät rechnet die Flugbahn selbst. Gesendet werden nur Aufschlag, Schlag und Punkt sowie die Schlägerposition.
+    // Der Spieler, zu dem der Ball fliegt, entscheidet über Netz, Aus und Aufsprung. Der Gegner wird spiegelbildlich gezeigt.
+    function post(path, body) {
+      return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (d) { d.ok = r.ok; d.http = r.status; return d; });
+        });
+    }
+
+    function makeRng(seed) {
+      var a = seed >>> 0;
+      return function () {
+        a = (a + 0x6D2B79F5) >>> 0;
+        var x = a;
+        x = Math.imul(x ^ (x >>> 15), x | 1);
+        x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function waiting() { return online && (!net || net.players < 2 || net.left); }
+    function waitBanner() { return !net ? "" : net.left ? "Dein Gegner hat die Partie verlassen" : "Warte auf deinen Gegner: Code " + net.code; }
+
+    function showView() {
+      var lob = online && !net;
+      lobby.hidden = !lob;
+      bar.hidden = !(online && net);
+      canvas.style.display = lob ? "none" : "";
+      aimRow.style.display = lob ? "none" : "";
+      row.style.display = lob ? "none" : "";
+      levelGroup.el.style.display = online ? "none" : "";
+      startBtn.style.display = online && !S.over ? "none" : "";
+      if (net) {
+        codeShow.textContent = net.code;
+        copyBtn.hidden = net.players === 2;
+        leaveBtn.textContent = S.over || net.left ? "Zurück zur Auswahl" : "Partie verlassen";
+      }
+    }
+
+    function setMode(m) {
+      if (m === (online ? "online" : "cpu")) return;
+      if (net) leaveNet();
+      online = m === "online";
+      modeGroup.mark(m);
+      lobbyMsg.textContent = "";
+      lobbyMsg.className = "msg";
+      newMatch();
+      showView();
+      if (!online) canvas.focus({ preventScroll: true });
+    }
+
+    function netSend(ev) {
+      if (!net) return;
+      ev.c = ++net.cid;
+      ev.m = net.match;
+      if (ev.pt === undefined) ev.pt = S.points;
+      net.outbox.push(ev);
+      kick();
+    }
+
+    function kick() {
+      if (!net || net.busy) return;
+      clearTimeout(net.timer);
+      sync();
+    }
+
+    function schedule() {
+      if (!net) return;
+      clearTimeout(net.timer);
+      var wait = document.hidden ? 1500 : net.outbox.length ? 0 : net.players < 2 ? 700 : 70;
+      net.timer = setTimeout(sync, wait);
+    }
+
+    function sync() {
+      var mine = net;
+      if (!mine || mine.busy) return;
+      mine.busy = true;
+      var sent = mine.outbox.slice(0, 8), t0 = performance.now();
+      post("/api/tischtennis/sync", { code: mine.code, token: mine.token, since: mine.since, send: sent, pos: { x: S.pl.x, y: S.pl.y } }).then(function (d) {
+        mine.busy = false;
+        if (stopped || net !== mine) return;
+        if (d.http === 404) return lostNet("Diese Partie gibt es nicht mehr. Erstelle eine neue Partie.");
+        if (d.http === 401) return lostNet("Die Sitzung ist abgelaufen. Melde dich neu an.");
+        if (d.ok) {
+          mine.rtt = mine.rtt * 0.8 + (performance.now() - t0) * 0.2;
+          if (sent.length) { var lastC = sent[sent.length - 1].c; mine.outbox = mine.outbox.filter(function (e) { return e.c > lastC; }); }
+          gotSync(d);
+        }
+        schedule();
+      }, function () {
+        mine.busy = false;
+        if (stopped || net !== mine) return;
+        if (mine.opp) { mine.opp = false; updateText(); }
+        schedule();
+      });
+    }
+
+    function gotSync(d) {
+      net.players = d.players;
+      if (net.opp !== !!d.opp_online) { net.opp = !!d.opp_online; updateText(); }
+      if (d.pos) { net.oppX = 2 * NETX - d.pos.x; net.oppY = 2 * MIDY - d.pos.y; }
+      var now = performance.now();
+      (d.events || []).forEach(function (ev) {
+        if (ev.s > net.since) net.since = ev.s;
+        ev.age = Math.max(0, d.now - ev.t) + net.rtt / 2000;
+        ev.arr = now;
+        net.inq.push(ev);
+      });
+      if (net.players === 2 && !net.started) { net.started = true; newMatch(); }
+      showView();
+    }
+
+    function lostNet(msg) {
+      clearTimeout(net && net.timer);
+      net = null;
+      newMatch();
+      showView();
+      lobbyMsg.textContent = msg;
+      lobbyMsg.className = "msg error";
+    }
+
+    function leaveNet() {
+      var mine = net;
+      if (!mine) return;
+      clearTimeout(mine.timer);
+      net = null;
+      var bye = { k: "bye", c: ++mine.cid, m: mine.match, pt: 0 };
+      post("/api/tischtennis/sync", { code: mine.code, token: mine.token, since: mine.since, send: mine.outbox.concat([bye]).slice(-8) }).then(null, function () {});
+    }
+
+    function startNet(d) {
+      net = { code: d.code, token: d.token, host: !!d.host, players: d.host ? 1 : 2, since: 0, outbox: [], cid: 0, match: 0, inq: [],
+        busy: false, timer: null, opp: true, left: false, rtt: 120, started: !d.host, oppX: 2 * NETX - 170, oppY: MIDY };
+      newMatch();
+      showView();
+      kick();
+      canvas.focus({ preventScroll: true });
+    }
+
+    function lobbyBusy(v) { createBtn.disabled = v; joinBtn.disabled = v; }
+
+    function lobbyFail(d) {
+      lobbyMsg.textContent = d.http === 401 ? "Die Sitzung ist abgelaufen. Melde dich neu an." :
+        d.http === 404 ? "Diesen Code gibt es nicht. Prüfe die Eingabe." :
+        d.http === 409 ? "Diese Partie ist schon voll." :
+        d.http === 429 ? "Zu viele Versuche. Warte kurz und versuche es erneut." :
+        "Das hat nicht geklappt. Versuche es erneut.";
+      lobbyMsg.className = "msg error";
+      lobbyBusy(false);
+    }
+
+    createBtn.addEventListener("click", function () {
+      lobbyBusy(true);
+      lobbyMsg.className = "msg";
+      lobbyMsg.textContent = "Erstelle Partie …";
+      post("/api/tischtennis/create", {}).then(function (d) {
+        lobbyBusy(false);
+        if (stopped) return;
+        if (!d.ok) return lobbyFail(d);
+        lobbyMsg.textContent = "";
+        startNet(d);
+      }, function () { lobbyFail({ http: 0 }); });
+    });
+
+    function joinGame() {
+      var code = codeIn.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      if (code.length !== 5) { lobbyMsg.className = "msg error"; lobbyMsg.textContent = "Der Code hat 5 Zeichen."; return; }
+      lobbyBusy(true);
+      lobbyMsg.className = "msg";
+      lobbyMsg.textContent = "Trete bei …";
+      post("/api/tischtennis/join", { code: code }).then(function (d) {
+        lobbyBusy(false);
+        if (stopped) return;
+        if (!d.ok) return lobbyFail(d);
+        lobbyMsg.textContent = "";
+        codeIn.value = "";
+        startNet(d);
+      }, function () { lobbyFail({ http: 0 }); });
+    }
+    joinBtn.addEventListener("click", joinGame);
+    codeIn.addEventListener("keydown", function (e) { if (e.key === "Enter") joinGame(); });
+
+    // Der Gegner wird weich zur gemeldeten Position bewegt (gespiegelt)
+    function moveOpp(h) {
+      var c = S.cpu;
+      if (!net) return;
+      var f = 1 - Math.exp(-14 * h);
+      c.x += (clamp(net.oppX, NETX + 16, W - PXMIN) - c.x) * f;
+      c.y += (clamp(net.oppY, PY0, PY1) - c.y) * f;
+    }
+
+    function handleEvent(ev) {
+      if (ev.k === "bye") {
+        net.left = true;
+        if (S.state === "rally" || S.state === "toss") S.state = "point";
+        S.pend = null; S.frozen = false;
+        banner = waitBanner();
+        showView();
+        return 0;
+      }
+      if (ev.k === "rematch") {
+        if (ev.m > net.match) { net.match = ev.m; newMatch(); showView(); }
+        return 0;
+      }
+      if (ev.m < net.match) return 0;
+      if (ev.m > net.match) return 1;
+      if (ev.pt < S.points) return 0;
+      if (ev.pt > S.points) return 1;
+      if (ev.k === "serve") {
+        if (S.state !== "serve" || S.server !== "R") return 1;
+        applyShot(ev, true);
+        return 0;
+      }
+      if (ev.k === "shot") {
+        if (S.state !== "rally") return 1;
+        applyShot(ev, false);
+        return 0;
+      }
+      if (ev.k === "point") {
+        if (S.state !== "rally") return 1;
+        award(ev.w === 1 ? "R" : "L", ev.why, { L: ev.sr, R: ev.sl });
+        return 0;
+      }
+      return 0;
+    }
+
+    function processInbox() {
+      if (!net || !net.inq.length) return;
+      var now = performance.now(), keep = [], q = net.inq;
+      net.inq = [];
+      q.sort(function (a, b) { return a.s - b.s; });
+      for (var i = 0; i < q.length; i++) {
+        if (!net) return;
+        if (handleEvent(q[i]) === 1 && now - q[i].arr < 6000) keep.push(q[i]);
+      }
+      if (net) net.inq = keep.concat(net.inq);
+    }
+
+    // Schlag des Gegners übernehmen (gespiegelt) und um die Übertragungszeit weiterlaufen lassen
+    function applyShot(ev, isServe) {
+      var b = S.ball;
+      b.x = 2 * NETX - ev.x; b.y = 2 * MIDY - ev.y; b.z = ev.z;
+      b.vx = -ev.vx; b.vy = -ev.vy; b.vz = ev.vz;
+      b.sp = ev.sp; b.sd = -ev.sd; b.rot = 0;
+      S.rng = makeRng(ev.seed);
+      S.frozen = false; S.pend = null;
+      S.last = "R"; S.bounced = false; S.cord = false; S.trail = []; S.preview = null;
+      S.cpu.flash = 0.18;
+      if (isServe) {
+        S.serveLeg = 1; S.expect = "R"; S.serve2 = { xt: 2 * NETX - ev.xt, yt: 2 * MIDY - ev.yt, T: ev.T };
+        S.state = "rally"; S.rally = 1; banner = "";
+      } else {
+        S.serveLeg = 0; S.expect = "L"; S.rally++;
+        if (S.rally > S.longest) S.longest = S.rally;
+      }
+      updateText();
+      var age = Math.min(0.45, ev.age + (performance.now() - ev.arr) / 1000), n = Math.floor(age / STEP);
+      S.pl.ox = S.pl.x; S.pl.oy = S.pl.y;
+      for (var i = 0; i < n && S.state === "rally" && !S.frozen; i++) stepBall(STEP);
     }
 
     // ---------- Schläge ----------
@@ -6816,6 +7164,10 @@ var FigurenArt = (function () {
       launch(b, sol.v1, sol.sp, sol.sd);
       S.serve2 = { xt: sol.xt2, yt: sol.yt2, T: sol.T2 };
       S.serveLeg = 1;
+      S.frozen = false; S.pend = null;
+      var seed = Math.floor(Math.random() * 1e9);
+      S.rng = makeRng(seed);
+      if (online) netSend({ k: "serve", x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, sp: b.sp, sd: b.sd, xt: sol.xt2, yt: sol.yt2, T: sol.T2, seed: seed });
       S.last = "L";
       S.expect = "L";
       S.bounced = false;
@@ -6936,6 +7288,10 @@ var FigurenArt = (function () {
       var T = Math.max(0.42, 0.74 - 0.24 * power - (smash ? 0.1 : 0));
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("L");
+      S.frozen = false; S.pend = null;
+      var seed = Math.floor(Math.random() * 1e9);
+      S.rng = makeRng(seed);
+      if (online) netSend({ k: "shot", x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, sp: b.sp, sd: b.sd, seed: seed });
       p.cd = 0.2;
       p.flash = 0.18;
       if (smash) pop("Smash!", p.x, p.y);
@@ -6976,11 +7332,21 @@ var FigurenArt = (function () {
     }
 
     // ---------- Punkte ----------
-    function award(side, why) {
+    // Gründe als Zahlen, damit sie online übertragen werden können
+    var WHY = ["", "Netz", "Ball landet auf der eigenen Seite", "Aufschlag muss zuerst auf der eigenen Seite aufspringen", "Ball landet auf der falschen Seite", "Ball im Aus"];
+    function whyText(code, side) {
+      if (code === 6) return side === "L" ? oppName2() + " erreicht den Ball nicht" : "Du erreichst den Ball nicht";
+      if (code === 7) return side === "L" ? oppName2() + " verpasst den Ball" : "Du verpasst den Ball";
+      return WHY[code] || "";
+    }
+    function oppName2() { return online ? "Dein Gegner" : "Der Computer"; }
+
+    function award(side, code, forced) {
       if (S.state !== "rally") return;
-      S.score[side]++;
-      S.points++;
+      if (forced) { S.score.L = forced.L; S.score.R = forced.R; S.points = forced.L + forced.R; }
+      else { S.score[side]++; S.points++; }
       S.state = "point";
+      S.frozen = false; S.pend = null;
       var a = S.score.L, b2 = S.score.R;
       if (S.longest > best) {
         best = S.longest;
@@ -6988,36 +7354,51 @@ var FigurenArt = (function () {
       }
       if ((a >= 11 || b2 >= 11) && Math.abs(a - b2) >= 2) {
         S.over = true;
-        banner = a > b2 ? "Du gewinnst " + a + " : " + b2 + "!" : "Computer gewinnt " + b2 + " : " + a + ".";
+        banner = a > b2 ? "Du gewinnst " + a + " : " + b2 + "!" : (online ? "Dein Gegner gewinnt " : "Computer gewinnt ") + b2 + " : " + a + ".";
         startBtn.textContent = "Noch ein Spiel";
         updateText();
+        showView();
         return;
       }
-      banner = (side === "L" ? "Punkt für dich" : "Punkt für den Computer") + (why ? ": " + why : "");
+      var why = whyText(code, side);
+      banner = (side === "L" ? "Punkt für dich" : "Punkt für " + (online ? "deinen Gegner" : "den Computer")) + (why ? ": " + why : "");
       updateText();
       nextTimer = setTimeout(function () { if (!stopped) prepareServe(); }, 1300);
     }
 
     function other(s) { return s === "L" ? "R" : "L"; }
 
+    // Entscheidung über den Ballwechsel. Online entscheidet immer der Spieler, zu dem der Ball fliegt.
+    // Der Schläger zeigt seinen eigenen Schlag nur an und wartet auf die Meldung des Gegners.
+    function decide(side, code) {
+      if (online && S.last === "L") {
+        if (!S.pend) S.pend = { side: side, code: code, at: performance.now() };
+        S.frozen = true;
+        return;
+      }
+      var pt = S.points;
+      award(side, code);
+      if (online) netSend({ k: "point", w: side === "R" ? 1 : 0, sl: S.score.L, sr: S.score.R, why: code, pt: pt });
+    }
+
     // Der letzte Schläger hat einen Fehler gemacht (Netz, ins Aus, falsche Seite).
-    function fault(why) { award(other(S.last), why); }
+    function fault(code) { decide(other(S.last), code); }
 
     function onBounce(x) {
       var side = x < NETX ? "L" : "R";
       if (!S.bounced) {
         if (side === S.expect) S.bounced = true;
-        else fault("Ball landet auf der eigenen Seite");
+        else fault(2);
       } else if (side === S.expect) {
-        award(S.last, S.last === "L" ? "Der Computer erreicht den Ball nicht" : "Du erreichst den Ball nicht");   // zweiter Aufsprung
+        decide(S.last, 6);                          // zweiter Aufsprung
       } else {
-        fault("Ball landet auf der falschen Seite");
+        fault(4);
       }
     }
 
-    function outOfPlay() {
-      if (S.bounced) award(S.last, S.last === "L" ? "Der Computer verpasst den Ball" : "Du verpasst den Ball");
-      else fault("Ball im Aus");
+    function decideOut() {
+      if (S.bounced) decide(S.last, 7);
+      else fault(5);
     }
 
     // ---------- Computergegner ----------
@@ -7033,7 +7414,7 @@ var FigurenArt = (function () {
         }
         pos = { x: b.x, y: b.y };
         if (bounced && b.vz < 0 && b.z <= HITZ - 12 && b.x >= NETX) break;
-        if (b.x > W + 30 || b.x < -30 || b.y < -30 || b.y > H + 30 || (b.z <= 0 && !onTable(b.x, b.y))) break;
+        if (b.x > XMAX || b.x < XMIN || b.y < YMIN || b.y > YMAX || (b.z <= 0 && !onTable(b.x, b.y))) break;
       }
       return pos;
     }
@@ -7051,7 +7432,7 @@ var FigurenArt = (function () {
         if (c.plan && performance.now() >= c.planAt) { tx = c.tx; ty = c.ty; }
         else if (c.plan) { tx = c.x; ty = c.y; }
       }
-      var dx = clamp(tx, NETX + 16, W - 14) - c.x, dy = clamp(ty, PY0, PY1) - c.y;
+      var dx = clamp(tx, NETX + 16, W - PXMIN) - c.x, dy = clamp(ty, PY0, PY1) - c.y;
       var dist = Math.sqrt(dx * dx + dy * dy), step = lv.speed * dt;
       var ox = c.x, oy = c.y;
       if (dist > step) { c.x += dx / dist * step; c.y += dy / dist * step; } else { c.x += dx; c.y += dy; }
@@ -7060,12 +7441,12 @@ var FigurenArt = (function () {
 
     // ---------- Schritt und Zeichnen ----------
     function movePlayer(dt) {
-      var p = S.pl, ox = p.x, oy = p.y, k = 420 * dt;
+      var p = S.pl, ox = p.x, oy = p.y, k = 560 * dt;
       if (keys.ArrowUp || keys.w) target.x += k;        // nach oben = zum Netz
       if (keys.ArrowDown || keys.s) target.x -= k;
       if (keys.ArrowLeft || keys.a) target.y -= k;
       if (keys.ArrowRight || keys.d) target.y += k;
-      target.x = clamp(target.x, 14, NETX - 16);
+      target.x = clamp(target.x, PXMIN, NETX - 16);
       target.y = clamp(target.y, PY0, PY1);
       var f = 1 - Math.exp(-24 * dt);                       // leicht geglättet
       p.x += (target.x - p.x) * f;
@@ -7090,6 +7471,7 @@ var FigurenArt = (function () {
     }
 
     function stepBall(dt) {
+      if (S.frozen) return;
       var b = S.ball, px = b.x, py = b.y, pz = b.z;
       advance(b, dt);
       b.rot += (b.sp * 11 + b.sd * 9) * dt;
@@ -7098,9 +7480,9 @@ var FigurenArt = (function () {
       if ((px < NETX) !== (b.x < NETX) && b.y > TT - NETEXT && b.y < TB + NETEXT && b.z < NETH + R * 0.4) {
         if (b.z > NETH - 5 && !S.cord) {               // Netzroller: der Ball streift die Netzkante und trudelt weiter
           S.cord = true;
-          b.vx *= 0.5; b.vz = Math.max(b.vz, 0) + 80; b.vy += (Math.random() - 0.5) * 160; b.sp *= 0.5; b.sd *= 0.5;
+          b.vx *= 0.5; b.vz = Math.max(b.vz, 0) + 80; b.vy += ((S.rng ? S.rng() : Math.random()) - 0.5) * 160 * (online && S.last === "R" ? -1 : 1); b.sp *= 0.5; b.sd *= 0.5;
           pop("Netzroller!", b.x, b.y);
-        } else { fault("Netz"); return; }
+        } else { fault(1); return; }
       }
 
       if (b.z <= 0 && b.vz < 0) {
@@ -7108,7 +7490,7 @@ var FigurenArt = (function () {
           bounce(b);
           if (S.serveLeg === 1) {                              // erster Aufsprung des Aufschlags
             var own = S.last === "L" ? b.x < NETX : b.x >= NETX;
-            if (!own) { fault("Aufschlag muss zuerst auf der eigenen Seite aufspringen"); return; }
+            if (!own) { fault(3); return; }
             S.serveLeg = 2;
             S.expect = other(S.last);
             S.bounced = false;
@@ -7116,41 +7498,50 @@ var FigurenArt = (function () {
             launch(b, plan(b.x, b.y, Math.max(b.z, 2), s2.xt, s2.yt, s2.T, b.sp, b.sd), b.sp, b.sd);   // von der Platte über das Netz
           } else onBounce(b.x);
           if (S.state !== "rally") return;
-        } else { outOfPlay(); return; }                      // Ball fällt neben der Platte auf den Boden
+        } else { decideOut(); return; }                      // Ball fällt neben der Platte auf den Boden
       }
-      if (b.x < -30 || b.x > W + 30 || b.y < -30 || b.y > H + 30) { outOfPlay(); return; }
+      if (b.x < XMIN || b.x > XMAX || b.y < YMIN || b.y > YMAX) { decideOut(); return; }
 
       // Geschlagen wird erst, nachdem der Ball auf der eigenen Seite aufgesprungen ist
       var ct;
       if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && (ct = hits(S.pl, px, py, pz))) playerHit(ct);
-      else if (S.bounced && S.expect === "R" && S.cpu.cd <= 0 && (ct = hits(S.cpu, px, py, pz))) cpuHit(ct);
+      else if (!online && S.bounced && S.expect === "R" && S.cpu.cd <= 0 && (ct = hits(S.cpu, px, py, pz))) cpuHit(ct);
+    }
+
+    var acc = 0, STEP = 1 / 240;                      // fester Zeitschritt: auf beiden Geräten läuft die Physik gleich
+    function step(h) {
+      S.pl.ox = S.pl.x; S.pl.oy = S.pl.y; S.cpu.ox = S.cpu.x; S.cpu.oy = S.cpu.y;
+      movePlayer(h);
+      if (online) moveOpp(h); else moveCpu(h);
+      S.pl.cd -= h; S.cpu.cd -= h;
+      S.pl.flash -= h; S.cpu.flash -= h;
+      if (S.pop) { S.pop.t -= h; if (S.pop.t <= 0) S.pop = null; }
+      if (S.state === "serve" && S.server === "L") { S.ball.x = S.pl.x + PR + 10; S.ball.y = S.pl.y; S.ball.z = 34; }
+      else if (S.state === "serve" && online) { S.ball.x = S.cpu.x - PR - 10; S.ball.y = S.cpu.y; S.ball.z = 34; }
+      if (S.state === "rally") stepBall(h);
+      else if (S.state === "toss") stepToss(h);
     }
 
     function frame(t) {
       if (stopped) return;
-      var dt = Math.min(0.033, (t - lastT) / 1000 || 0.016);
+      var dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
       lastT = t;
       if (!document.hidden) {
-        var sub = 4, h = dt / sub;
-        for (var i = 0; i < sub; i++) {
-          S.pl.ox = S.pl.x; S.pl.oy = S.pl.y; S.cpu.ox = S.cpu.x; S.cpu.oy = S.cpu.y;
-          movePlayer(h);
-          moveCpu(h);
-          S.pl.cd -= h; S.cpu.cd -= h;
-          S.pl.flash -= h; S.cpu.flash -= h;
-          if (S.pop) { S.pop.t -= h; if (S.pop.t <= 0) S.pop = null; }
-          if (S.state === "serve" && S.server === "L") { S.ball.x = S.pl.x + PR + 10; S.ball.y = S.pl.y; S.ball.z = 34; }
-          if (S.state === "rally") stepBall(h);
-          else if (S.state === "toss") stepToss(h);
-        }
+        if (online) processInbox();
+        acc += dt;
+        var n = 0;
+        while (acc >= STEP && n < 16) { step(STEP); acc -= STEP; n++; }
+        if (acc > STEP) acc = 0;
         if (S.state === "rally" || S.state === "point") {
           S.trail.push({ x: S.ball.x, y: S.ball.y, z: S.ball.z });
           if (S.trail.length > 16) S.trail.shift();
         } else if (S.trail.length) S.trail = [];
-        if (S.state === "serve" && S.server === "R" && performance.now() >= S.serveAt) cpuServe();
+        if (!online && S.state === "serve" && S.server === "R" && performance.now() >= S.serveAt) cpuServe();
         if ((S.state === "serve" && S.server === "L") || S.state === "toss") {
           if (performance.now() - S.previewAt > 90) { S.previewAt = performance.now(); computePreview(); }
         } else S.preview = null;
+        // Meldung des Gegners bleibt aus: dann gilt nach kurzer Zeit die eigene Einschätzung
+        if (S.pend && S.state === "rally" && performance.now() - S.pend.at > 3500) { var pd = S.pend; award(pd.side, pd.code); }
       }
       draw();
       raf = requestAnimationFrame(frame);
@@ -7222,7 +7613,7 @@ var FigurenArt = (function () {
 
     // ---------- 3D-Ansicht (Kamera hinter deinem Ende der Platte) ----------
     var CW = 840, CH = 640, FLOORZ = -140, PADZ = 24;
-    var CAM = { x: -170, y: MIDY, z: 340, th: 0.95, F: 460, cx: CW / 2, cy: 330 };
+    var CAM = { x: -190, y: MIDY, z: 360, th: 0.95, F: 400, cx: CW / 2, cy: 330 };
     CAM.c = Math.cos(CAM.th); CAM.s = Math.sin(CAM.th);
 
     function proj(x, y, z) {
@@ -7330,10 +7721,10 @@ var FigurenArt = (function () {
       bg.addColorStop(0, "#0a1a24"); bg.addColorStop(1, "#16384a");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, CW, CH);
-      var mat = [[-120, -300, FLOORZ], [980, -300, FLOORZ], [980, 880, FLOORZ], [-120, 880, FLOORZ]];
+      var mat = [[-260, -420, FLOORZ], [1020, -420, FLOORZ], [1020, 1000, FLOORZ], [-260, 1000, FLOORZ]];
       poly3(mat, "rgba(255,255,255,0.05)", "rgba(255,255,255,0.12)", 1.5);
-      for (i = -120; i <= 980; i += 100) line3([i, -300, FLOORZ], [i, 880, FLOORZ], "rgba(255,255,255,0.06)", 1);
-      for (i = -300; i <= 880; i += 100) line3([-120, i, FLOORZ], [980, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
+      for (i = -260; i <= 1020; i += 100) line3([i, -420, FLOORZ], [i, 1000, FLOORZ], "rgba(255,255,255,0.06)", 1);
+      for (i = -420; i <= 1000; i += 100) line3([-260, i, FLOORZ], [1020, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
       // Beine und Schatten der Platte
       poly3([[TL + 10, TT + 10, FLOORZ], [TR + 14, TT + 10, FLOORZ], [TR + 14, TB + 14, FLOORZ], [TL + 10, TB + 14, FLOORZ]], "rgba(0,0,0,0.28)");
       [[TL + 28, TT + 14], [TL + 28, TB - 14], [TR - 28, TT + 14], [TR - 28, TB - 14]].forEach(function (l) {
@@ -7403,9 +7794,9 @@ var FigurenArt = (function () {
       ctx.font = "700 24px Georgia, serif";
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(10, 10, 168, 36); ctx.fillRect(10, CH - 46, 108, 36);
+      ctx.fillRect(10, 10, 150 + (online ? 0 : 18), 36); ctx.fillRect(10, CH - 46, 108, 36);
       ctx.fillStyle = "#fff";
-      ctx.fillText("Computer " + S.score.R, 18, 36);
+      ctx.fillText(oppName() + " " + S.score.R, 18, 36);
       ctx.fillText("Du " + S.score.L, 18, CH - 20);
       if (S.over) { S.endAt = S.endAt || now; drawEnd(S.score.L > S.score.R, (now - S.endAt) / 1000); } else S.endAt = 0;
       if (banner) {
@@ -7465,7 +7856,7 @@ var FigurenArt = (function () {
     }
 
     function tryServe() {
-      if (S.state === "serve" && S.server === "L" && !S.over) toss();
+      if (S.state === "serve" && S.server === "L" && !S.over && !waiting()) toss();
     }
 
     canvas.addEventListener("wheel", function (e) {
@@ -7496,13 +7887,23 @@ var FigurenArt = (function () {
       keys[k] = e.type === "keydown";
     }
 
-    startBtn.addEventListener("click", function () { startBtn.textContent = "Neues Spiel"; newMatch(); canvas.focus({ preventScroll: true }); });
+    startBtn.addEventListener("click", function () {
+      startBtn.textContent = "Neues Spiel";
+      if (online) {
+        if (!net || waiting()) return;
+        net.match++;
+        netSend({ k: "rematch", pt: 0 });
+      }
+      newMatch();
+      showView();
+      canvas.focus({ preventScroll: true });
+    });
     document.addEventListener("keydown", onKey);
     document.addEventListener("keyup", onKey);
     document.addEventListener("farbe-geaendert", draw);
 
     // Für Tests
-    canvas.__tt = function () { return { S: S, target: target }; };
+    canvas.__tt = function () { return { S: S, target: target, net: net, online: online }; };
 
     newMatch();
     raf = requestAnimationFrame(frame);
@@ -7515,6 +7916,7 @@ var FigurenArt = (function () {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("keyup", onKey);
       document.removeEventListener("farbe-geaendert", draw);
+      leaveNet();
     };
   }
 

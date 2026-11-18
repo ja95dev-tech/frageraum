@@ -645,7 +645,7 @@
       return fmtInt(w.stats.played) + " gespielt, Serie " + fmtInt(num(w.stats.streak)) + ", längste Serie " + fmtInt(num(w.stats.best));
     } },
     { id: "snake", icon: "🐍", name: "Snake", desc: "Der Klassiker", stat: bestStat("snake-best") },
-    { id: "tischtennis", icon: "🏓", name: "Tischtennis", desc: "Ansicht von oben, gegen den Computer, bis 11 Punkte", stat: function () {
+    { id: "tischtennis", icon: "🏓", name: "Tischtennis", desc: "Gegen den Computer oder online mit Code, bis 11 Punkte", stat: function () {
       var v = Number(store.get("tischtennis-best"));
       return v > 0 ? "Längster Ballwechsel: " + fmtInt(v) : "Noch nicht gespielt";
     } },

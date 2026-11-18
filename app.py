@@ -465,6 +465,204 @@ def chess_act():
         con.close()
 
 
+# --- Tischtennis online -------------------------------------------------------------
+# Jeder Spieler berechnet die Flugbahn selbst. Über den Server laufen nur kurze Ereignisse
+# (Aufschlag, Schlag, Punkt) und die Position des Schlägers. Der Server prüft nur Form und Größe.
+TT_MAX_ROOMS = 200
+TT_KINDS = {"serve", "shot", "point", "rematch", "bye"}
+TT_KEEP = 120
+
+tt_create_limit = Limiter(limit=10, window_seconds=60)
+tt_join_limit = Limiter(limit=20, window_seconds=60)
+tt_sync_limit = Limiter(limit=2400, window_seconds=60)
+
+
+def tt_init():
+    con = chess_db()
+    try:
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS ttrooms (code TEXT PRIMARY KEY, updated REAL, htok TEXT, gtok TEXT, "
+            "hseen REAL, gseen REAL, hc INTEGER, gc INTEGER, seq INTEGER, events TEXT, hpos TEXT, gpos TEXT, status TEXT)"
+        )
+    finally:
+        con.close()
+
+
+tt_init()
+
+
+def tt_find(con, data):
+    code = data.get("code") if isinstance(data, dict) else None
+    token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(code, str) or not isinstance(token, str) or not CHESS_CODE_RE.match(code):
+        return None, None
+    row = con.execute("SELECT * FROM ttrooms WHERE code = ?", (code,)).fetchone()
+    if not row:
+        return None, None
+    for side in ("h", "g"):
+        t = row[side + "tok"]
+        if t and hmac.compare_digest(t, token):
+            return row, side
+    return None, None
+
+
+def tt_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) < 4000000000
+
+
+def tt_clean_event(ev):
+    """Lässt nur kurze Ereignisse mit Zahlenfeldern zu."""
+    if not isinstance(ev, dict) or ev.get("k") not in TT_KINDS or len(ev) > 20:
+        return None
+    out = {"k": ev["k"]}
+    for key, val in ev.items():
+        if key == "k":
+            continue
+        if not isinstance(key, str) or len(key) > 6 or not tt_number(val):
+            return None
+        out[key] = val
+    if not tt_number(out.get("c")):
+        return None
+    return out
+
+
+def tt_clean_pos(pos):
+    if isinstance(pos, dict) and tt_number(pos.get("x")) and tt_number(pos.get("y")):
+        return {"x": round(float(pos["x"]), 1), "y": round(float(pos["y"]), 1)}
+    return None
+
+
+@app.post("/api/tischtennis/create")
+def tt_create():
+    denied = chess_gate(tt_create_limit)
+    if denied:
+        return denied
+    token = secrets.token_urlsafe(16)
+    now = time.time()
+    con = chess_db()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("DELETE FROM ttrooms WHERE updated < ?", (now - 6 * 3600,))
+        if con.execute("SELECT COUNT(*) FROM ttrooms").fetchone()[0] >= TT_MAX_ROOMS:
+            con.execute("ROLLBACK")
+            return api_error("Zu viele offene Partien.", 503)
+        code = None
+        for _ in range(20):
+            c = "".join(secrets.choice(CHESS_CODE_CHARS) for _ in range(5))
+            if not con.execute("SELECT 1 FROM ttrooms WHERE code = ?", (c,)).fetchone():
+                code = c
+                break
+        if code is None:
+            con.execute("ROLLBACK")
+            return api_error("Kein freier Code.", 503)
+        con.execute(
+            "INSERT INTO ttrooms (code, updated, htok, gtok, hseen, gseen, hc, gc, seq, events, hpos, gpos, status) "
+            "VALUES (?, ?, ?, NULL, ?, 0, 0, 0, 0, '[]', NULL, NULL, 'wait')",
+            (code, now, token, now),
+        )
+        con.execute("COMMIT")
+    finally:
+        con.close()
+    return jsonify({"code": code, "token": token, "host": 1})
+
+
+@app.post("/api/tischtennis/join")
+def tt_join():
+    denied = chess_gate(tt_join_limit)
+    if denied:
+        return denied
+    data = request.get_json(silent=True)
+    code = data.get("code") if isinstance(data, dict) else None
+    code = code.strip().upper() if isinstance(code, str) else ""
+    if not CHESS_CODE_RE.match(code):
+        return api_error("Ungültiger Code.", 400)
+    token = secrets.token_urlsafe(16)
+    now = time.time()
+    con = chess_db()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute("SELECT * FROM ttrooms WHERE code = ?", (code,)).fetchone()
+        if not row:
+            con.execute("ROLLBACK")
+            return api_error("Diesen Code gibt es nicht.", 404)
+        if row["gtok"] or row["status"] == "end":
+            con.execute("ROLLBACK")
+            return api_error("Die Partie ist schon voll.", 409)
+        con.execute("UPDATE ttrooms SET gtok = ?, gseen = ?, status = 'play', updated = ? WHERE code = ?", (token, now, now, code))
+        con.execute("COMMIT")
+    finally:
+        con.close()
+    return jsonify({"code": code, "token": token, "host": 0})
+
+
+@app.post("/api/tischtennis/sync")
+def tt_sync():
+    """Schickt eigene Ereignisse und Position und holt die des Gegners (schnelles Abfragen)."""
+    denied = chess_gate(tt_sync_limit)
+    if denied:
+        return denied
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("Ungültige Anfrage.", 400)
+    since = data.get("since")
+    since = since if isinstance(since, int) and not isinstance(since, bool) and since >= 0 else 0
+    send = data.get("send")
+    send = send if isinstance(send, list) else []
+    pos = tt_clean_pos(data.get("pos"))
+    con = chess_db()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        row, side = tt_find(con, data)
+        if not row:
+            con.execute("ROLLBACK")
+            return api_error("Partie nicht gefunden.", 404)
+        now = time.time()
+        other = "g" if side == "h" else "h"
+        events = json.loads(row["events"])
+        seq = row["seq"]
+        lastc = row[side + "c"]
+        status = row["status"]
+        for ev in send[:8]:
+            ev = tt_clean_event(ev)
+            if ev is None or ev["c"] <= lastc:
+                continue
+            lastc = ev["c"]
+            seq += 1
+            ev["s"] = seq
+            ev["f"] = side
+            ev["t"] = now
+            events.append(ev)
+            if ev["k"] == "bye":
+                status = "end"
+        events = events[-TT_KEEP:]
+        sets = ["%sseen = ?" % side, "%sc = ?" % side, "seq = ?", "events = ?", "status = ?", "updated = ?"]
+        vals = [now, lastc, seq, json.dumps(events), status, now]
+        if pos:
+            sets.append("%spos = ?" % side)
+            vals.append(json.dumps(pos))
+        vals.append(row["code"])
+        con.execute("UPDATE ttrooms SET " + ", ".join(sets) + " WHERE code = ?", vals)
+        con.execute("COMMIT")
+        out = [
+            {k: v for k, v in e.items() if k not in ("f", "c")}
+            for e in events
+            if e["f"] == other and e["s"] > since
+        ][:60]
+        opp_pos = json.loads(row[other + "pos"]) if row[other + "pos"] else None
+        return jsonify({
+            "you": side,
+            "status": status,
+            "players": 2 if row["gtok"] else 1,
+            "opp_online": now - (row[other + "seen"] or 0) < 6,
+            "now": now,
+            "seq": seq,
+            "events": out,
+            "pos": opp_pos,
+        })
+    finally:
+        con.close()
+
+
 # --- Statusseite (ohne Login, zeigt nur, ob die Dateien da sind) ---------------------
 @app.get("/health")
 def health():
