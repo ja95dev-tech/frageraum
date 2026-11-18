@@ -6531,7 +6531,7 @@ var FigurenArt = (function () {
   var BALLVIS = 1.4;                          // Der Ball wird größer gezeichnet
   var HITZ = 56;                              // bis zu dieser Höhe kann der Ball getroffen werden
   var MIDY = (TT + TB) / 2;
-  var SIDE = 78;                              // so weit darfst du seitlich über die Plattenkante hinaus laufen
+  var SIDE = 130;                              // so weit darfst du seitlich über die Plattenkante hinaus laufen
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level";
 
@@ -6627,11 +6627,11 @@ var FigurenArt = (function () {
 
   function start(box) {
     var canvas = document.createElement("canvas");
-    canvas.width = 420;                       // 3D-Ansicht von hinten (hochkant)
+    canvas.width = 840;                       // 3D-Ansicht von hinten (hochkant)
     canvas.height = 640;
     canvas.className = "game-canvas";
-    canvas.style.aspectRatio = "420 / 640";
-    canvas.style.maxWidth = "min(100%, 24rem, calc(78vh * " + (420 / 640).toFixed(3) + "))";
+    canvas.style.aspectRatio = "840 / 640";
+    canvas.style.maxWidth = "min(100%, 52rem, calc(78vh * " + (840 / 640).toFixed(3) + "))";
     canvas.setAttribute("role", "img");
     canvas.tabIndex = 0;
     canvas.setAttribute("aria-label", "Tischtennisplatte in 3D von hinten gesehen. Du spielst vorne, der Computer hinten.");
@@ -7182,7 +7182,7 @@ var FigurenArt = (function () {
 
     // Spin-Anzeige: so dreht sich der Ball gerade (nimmt in der Luft ab und beim Aufsprung stark ab)
     function drawSpinHud(ink, panel, b) {
-      var x0 = 420 - 126, y0 = 640 - 78, w = 114, h = 66;
+      var x0 = 840 - 126, y0 = 640 - 78, w = 114, h = 66;
       ctx.fillStyle = panel;
       ctx.globalAlpha = 0.85;
       ctx.fillRect(x0, y0, w, h);
@@ -7221,8 +7221,8 @@ var FigurenArt = (function () {
     }
 
     // ---------- 3D-Ansicht (Kamera hinter deinem Ende der Platte) ----------
-    var CW = 420, CH = 640, FLOORZ = -140, PADZ = 24;
-    var CAM = { x: -170, y: MIDY, z: 340, th: 0.95, F: 400, cx: CW / 2, cy: 310 };
+    var CW = 840, CH = 640, FLOORZ = -140, PADZ = 24;
+    var CAM = { x: -170, y: MIDY, z: 340, th: 0.95, F: 460, cx: CW / 2, cy: 330 };
     CAM.c = Math.cos(CAM.th); CAM.s = Math.sin(CAM.th);
 
     function proj(x, y, z) {
@@ -7330,10 +7330,10 @@ var FigurenArt = (function () {
       bg.addColorStop(0, "#0a1a24"); bg.addColorStop(1, "#16384a");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, CW, CH);
-      var mat = [[-120, -60, FLOORZ], [980, -60, FLOORZ], [980, 640, FLOORZ], [-120, 640, FLOORZ]];
+      var mat = [[-120, -300, FLOORZ], [980, -300, FLOORZ], [980, 880, FLOORZ], [-120, 880, FLOORZ]];
       poly3(mat, "rgba(255,255,255,0.05)", "rgba(255,255,255,0.12)", 1.5);
-      for (i = -120; i <= 980; i += 100) line3([i, -60, FLOORZ], [i, 640, FLOORZ], "rgba(255,255,255,0.06)", 1);
-      for (i = -60; i <= 640; i += 100) line3([-120, i, FLOORZ], [980, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
+      for (i = -120; i <= 980; i += 100) line3([i, -300, FLOORZ], [i, 880, FLOORZ], "rgba(255,255,255,0.06)", 1);
+      for (i = -300; i <= 880; i += 100) line3([-120, i, FLOORZ], [980, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
       // Beine und Schatten der Platte
       poly3([[TL + 10, TT + 10, FLOORZ], [TR + 14, TT + 10, FLOORZ], [TR + 14, TB + 14, FLOORZ], [TL + 10, TB + 14, FLOORZ]], "rgba(0,0,0,0.28)");
       [[TL + 28, TT + 14], [TL + 28, TB - 14], [TR - 28, TT + 14], [TR - 28, TB - 14]].forEach(function (l) {
