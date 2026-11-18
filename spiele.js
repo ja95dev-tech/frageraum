@@ -6514,9 +6514,9 @@ var FigurenArt = (function () {
 // Der Ball hat zusätzlich eine Höhe (z) und Spin: Topspin sinkt schneller und springt flach nach vorn,
 // Unterschnitt schwebt und bremst nach dem Aufsprung, Seitenspin lässt den Ball in der Luft und beim Aufsprung zur Seite wandern.
 (window.Spiele = window.Spiele || []).push((function () {
-  var W = 760, H = 420;                       // Länge und Breite des Spielfelds
+  var W = 760, H = 580;                       // Länge und Breite des Spielfelds (breiter: neben der Platte ist Platz zum Laufen)
   var TL = 120, TR = 640;                     // Platte: von links nach rechts (Länge 520, wie 274 cm)
-  var TT = 66, TB = 354;                      // Platte: oben bis unten (Breite 288, wie 152,5 cm)
+  var TT = 146, TB = 434;                     // Platte: oben bis unten (Breite 288, wie 152,5 cm)
   var NETX = 380, NETH = 28, NETEXT = 26;     // Netz in der Mitte, Höhe und Überstand an den Seiten
   var R = 7;                                  // Ballradius
   var G = 950;                                // Schwerkraft (in z-Richtung)
@@ -6531,6 +6531,8 @@ var FigurenArt = (function () {
   var BALLVIS = 1.4;                          // Der Ball wird größer gezeichnet
   var HITZ = 56;                              // bis zu dieser Höhe kann der Ball getroffen werden
   var MIDY = (TT + TB) / 2;
+  var SIDE = 78;                              // so weit darfst du seitlich über die Plattenkante hinaus laufen
+  var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level";
 
   var LEVELS = {
@@ -6554,9 +6556,11 @@ var FigurenArt = (function () {
 
   function bounce(b) {
     b.z = 0;
-    b.vz = -b.vz * clamp(0.88 - 0.1 * b.sp, 0.7, 0.98);
+    var hard = clamp(-b.vz / 500, 0, 1);            // harte Aufsprünge verlieren mehr Höhe
+    b.vz = -b.vz * clamp(0.9 - 0.06 * hard - 0.1 * b.sp, 0.68, 0.98);
     var f = BOUNCE_FRICTION * (1 + 0.35 * b.sp);   // Topspin schiebt nach vorn, Unterschnitt bremst
     b.vx *= f; b.vy *= f;
+    if (b.sp > 0.3) b.vz *= 1 - 0.12 * b.sp;      // Topspin springt flacher
     b.vy += b.sd * KICK;                           // Seitenspin schiebt zur Seite
     b.sp *= 0.6; b.sd *= 0.6;
   }
@@ -6709,7 +6713,7 @@ var FigurenArt = (function () {
 
     var help = document.createElement("p");
     help.className = "hint";
-    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen.";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen.";
 
     box.appendChild(levelGroup.el);
     box.appendChild(canvas);
@@ -6903,21 +6907,32 @@ var FigurenArt = (function () {
     function playerHit(ct) {
       var b = S.ball, p = S.pl;
       var core = PR + R, d = Math.sqrt(ct.rx * ct.rx + ct.ry * ct.ry);
-      var q = d <= core ? 1 : 1 - 0.45 * clamp((d - core) / (PREACH - core), 0, 1);
+      var q = d <= core ? 1 : 1 - 0.45 * clamp((d - core) / (PREACH - core), 0, 1);      // Treffer auf der Schlägermitte
       var behind = ct.rx < -core * 0.6;                           // Ball hinter der Schlägermitte
       if (behind) q *= 0.75;
-      var incoming = clamp(Math.sqrt(b.vx * b.vx + b.vy * b.vy) / 1000, 0, 1) * 0.15;
-      var power = clamp(clamp(p.sx / 520, 0, 1) + clamp(Math.abs(p.sy) / 900, 0, 0.3) + incoming, 0, 1);
-      var smash = b.z >= 30 && p.sx > 260 && q > 0.8;             // hoher Ball und schneller Schlag nach vorn
+      q *= 1 - 0.22 * clamp(Math.abs(ct.z - 26) / 30, 0, 1);      // beste Trefferhöhe: etwa auf Schlägerhöhe
+      var inSp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+      var swing = Math.sqrt(p.sx * p.sx + p.sy * p.sy);
+      // Härte des Schlags: Schlägertempo nach vorn plus ein Teil der Ballenergie (Block)
+      var power = clamp(clamp(p.sx / 520, 0, 1) * 0.85 + clamp(Math.abs(p.sy) / 900, 0, 0.25) + clamp(inSp / 1100, 0, 1) * 0.2, 0, 1);
+      var smash = b.z >= 30 && p.sx > 260 && q > 0.75;            // hoher Ball und schneller Schlag nach vorn
       if (smash) power = clamp(power + 0.25, 0, 1);
       var xt = NETX + 60 + 175 * power * (0.6 + 0.4 * q);
-      var slope = clamp(ct.ry / PREACH * 0.9, -0.5, 0.5);         // seitlich getroffen: schräger Schlag
-      var raw = b.y + slope * (xt - b.x) + p.sy * 0.1;
-      var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.55; // leichte Hilfe, den Ball auf die Platte zu bringen
-      yt += (1 - q) * 70 * (Math.random() * 2 - 1);
-      xt += (1 - q) * 40 * (Math.random() * 2 - 1);
+      // Richtung: Schlagrichtung des Schlägers und Treffpunkt auf dem Blatt
+      var swingSlope = clamp(p.sy / Math.max(140, Math.abs(p.sx)), -0.8, 0.8);
+      var slope = clamp(ct.ry / PREACH * 0.7 + swingSlope * 0.55, -0.8, 0.8);
+      var raw = b.y + slope * (xt - b.x);
+      var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.5;  // leichte Hilfe, den Ball auf die Platte zu bringen
+      // Ungenauigkeit: schlechter Treffpunkt und sehr schnelle Schläge nehmen Kontrolle
+      var loose = (1 - q) * 70 + clamp((swing - 450) / 600, 0, 1) * 18;
+      yt += loose * (Math.random() * 2 - 1);
+      xt += loose * 0.55 * (Math.random() * 2 - 1);
       var spin = computeSpin(p, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
       if (behind) sp = Math.min(sp, -0.2);
+      // Spin des ankommenden Balls: Topspin springt länger, Unterschnitt kürzer, Seitenspin lenkt ab
+      xt += clamp(b.sp, -1, 1) * 28 * (1 - 0.6 * clamp(-p.sx / 200, 0, 1));
+      yt += clamp(b.sd, -1, 1) * 22;
+      xt = clamp(xt, NETX + 30, TR + 40);
       var T = Math.max(0.42, 0.74 - 0.24 * power - (smash ? 0.1 : 0));
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("L");
@@ -7036,7 +7051,7 @@ var FigurenArt = (function () {
         if (c.plan && performance.now() >= c.planAt) { tx = c.tx; ty = c.ty; }
         else if (c.plan) { tx = c.x; ty = c.y; }
       }
-      var dx = clamp(tx, NETX + 16, W - 14) - c.x, dy = clamp(ty, 40, H - 40) - c.y;
+      var dx = clamp(tx, NETX + 16, W - 14) - c.x, dy = clamp(ty, PY0, PY1) - c.y;
       var dist = Math.sqrt(dx * dx + dy * dy), step = lv.speed * dt;
       var ox = c.x, oy = c.y;
       if (dist > step) { c.x += dx / dist * step; c.y += dy / dist * step; } else { c.x += dx; c.y += dy; }
@@ -7051,7 +7066,7 @@ var FigurenArt = (function () {
       if (keys.ArrowLeft || keys.a) target.y -= k;
       if (keys.ArrowRight || keys.d) target.y += k;
       target.x = clamp(target.x, 14, NETX - 16);
-      target.y = clamp(target.y, 40, H - 40);
+      target.y = clamp(target.y, PY0, PY1);
       var f = 1 - Math.exp(-24 * dt);                       // leicht geglättet
       p.x += (target.x - p.x) * f;
       p.y += (target.y - p.y) * f;
@@ -7207,7 +7222,7 @@ var FigurenArt = (function () {
 
     // ---------- 3D-Ansicht (Kamera hinter deinem Ende der Platte) ----------
     var CW = 420, CH = 640, FLOORZ = -140, PADZ = 24;
-    var CAM = { x: -150, y: MIDY, z: 300, th: 0.85, F: 530, cx: CW / 2, cy: 335 };
+    var CAM = { x: -170, y: MIDY, z: 340, th: 0.95, F: 400, cx: CW / 2, cy: 310 };
     CAM.c = Math.cos(CAM.th); CAM.s = Math.sin(CAM.th);
 
     function proj(x, y, z) {
@@ -7315,10 +7330,10 @@ var FigurenArt = (function () {
       bg.addColorStop(0, "#0a1a24"); bg.addColorStop(1, "#16384a");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, CW, CH);
-      var mat = [[-120, -240, FLOORZ], [980, -240, FLOORZ], [980, 660, FLOORZ], [-120, 660, FLOORZ]];
+      var mat = [[-120, -60, FLOORZ], [980, -60, FLOORZ], [980, 640, FLOORZ], [-120, 640, FLOORZ]];
       poly3(mat, "rgba(255,255,255,0.05)", "rgba(255,255,255,0.12)", 1.5);
-      for (i = -120; i <= 980; i += 100) line3([i, -240, FLOORZ], [i, 660, FLOORZ], "rgba(255,255,255,0.06)", 1);
-      for (i = -240; i <= 660; i += 100) line3([-120, i, FLOORZ], [980, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
+      for (i = -120; i <= 980; i += 100) line3([i, -60, FLOORZ], [i, 640, FLOORZ], "rgba(255,255,255,0.06)", 1);
+      for (i = -60; i <= 640; i += 100) line3([-120, i, FLOORZ], [980, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
       // Beine und Schatten der Platte
       poly3([[TL + 10, TT + 10, FLOORZ], [TR + 14, TT + 10, FLOORZ], [TR + 14, TB + 14, FLOORZ], [TL + 10, TB + 14, FLOORZ]], "rgba(0,0,0,0.28)");
       [[TL + 28, TT + 14], [TL + 28, TB - 14], [TR - 28, TT + 14], [TR - 28, TB - 14]].forEach(function (l) {
