@@ -5893,6 +5893,40 @@ var FigurenArt = (function () {
     return lines;
   }
 
+  // ---------- Geheimcodes ----------
+  // Ein Code wird eingegeben, geprüft und schreibt direkt in den gespeicherten Stand.
+  function qiEngine() {
+    var list = window.Spiele || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === "quallenimperium" && list[i]._engine) return list[i]._engine;
+    return null;
+  }
+
+  var CODES = {
+    // Quallen-Imperium: die ersten fünf Galaxien sind besiedelt, du baust ab jetzt in der sechsten
+    GALAXIE6: function () {
+      var eng = qiEngine();
+      if (!eng) return { error: "Quallen-Imperium ist nicht geladen. Lade die Seite neu und versuche es noch einmal." };
+      var s = null;
+      try { s = JSON.parse(localStorage.getItem("quallenimperium-v1")); } catch (e) {}
+      if (!s || !Array.isArray(s.owned) || !isFinite(s.coins) || !isFinite(s.total)) s = eng.newState();
+      var target = eng.GAL_END[4];                       // fünf vollständige Galaxien
+      var gal = eng.GALAXIES[5];
+      if ((s.planets || 0) >= target) return { ok: "Du bist im Quallen-Imperium schon in der sechsten Galaxie oder weiter. Es wurde nichts verändert." };
+      s.planets = target;
+      s.last = Date.now();
+      try { localStorage.setItem("quallenimperium-v1", JSON.stringify(s)); } catch (e) { return { error: "Der Stand konnte nicht gespeichert werden." }; }
+      return { ok: "Eingelöst: Im Quallen-Imperium sind jetzt " + target + " Planeten besiedelt und die Boni der ersten fünf Galaxien aktiv. Du baust in der Galaxie „" + gal.name + "“ weiter. Öffne das Quallen-Imperium, um sie zu sehen." };
+    }
+  };
+  CODES.UNIVERSUM6 = CODES.GALAXIE6;
+
+  function redeem(text) {
+    var key = String(text || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!key) return { error: "Gib einen Code ein." };
+    if (!Object.prototype.hasOwnProperty.call(CODES, key)) return { error: "Diesen Code gibt es nicht. Prüfe die Eingabe." };
+    return CODES[key]();
+  }
+
   // ---------- Oberfläche ----------
   var CSS = ".ss-ta{min-height:3.5rem;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.8rem;line-height:1.3;word-break:break-all}" +
     ".ss-list{padding-left:1.2rem;margin:0.25rem 0 1rem}" +
@@ -5983,8 +6017,30 @@ var FigurenArt = (function () {
     inn.appendChild(reloadBtn);
     inn.appendChild(el("p", "msg", "Zusammenführen behält jeweils den besseren Wert (höchster Rekord, schnellste Zeit, weitester Fortschritt). Alles ersetzen überschreibt den Stand auf diesem Gerät komplett."));
 
+    // --- Code einlösen ---
+    var red = el("div", "ss-sec");
+    red.appendChild(el("p", "label", "Code einlösen"));
+    red.appendChild(el("p", "msg", "Hast du einen Spezialcode? Gib ihn hier ein."));
+    var redRow = el("div", "row");
+    var redIn = document.createElement("input");
+    redIn.type = "text";
+    redIn.maxLength = 24;
+    redIn.autocomplete = "off";
+    redIn.setAttribute("autocapitalize", "characters");
+    redIn.setAttribute("spellcheck", "false");
+    redIn.setAttribute("aria-label", "Spezialcode");
+    var redBtn = el("button", "", "Einlösen");
+    redBtn.type = "button";
+    redRow.appendChild(redIn);
+    redRow.appendChild(redBtn);
+    red.appendChild(redRow);
+    var redMsg = el("p", "msg");
+    redMsg.setAttribute("aria-live", "polite");
+    red.appendChild(redMsg);
+
     box.appendChild(out);
     box.appendChild(inn);
+    box.appendChild(red);
 
     function setMsg(target, text, isError) {
       target.textContent = text || "";
@@ -6074,6 +6130,16 @@ var FigurenArt = (function () {
     replaceBtn.addEventListener("click", function () { doImport("replace"); });
     reloadBtn.addEventListener("click", function () { window.location.reload(); });
 
+    function doRedeem() {
+      var r = redeem(redIn.value);
+      if (r.error) { setMsg(redMsg, r.error, true); return; }
+      setMsg(redMsg, r.ok);
+      redIn.value = "";
+      refreshExport();
+    }
+    redBtn.addEventListener("click", doRedeem);
+    redIn.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); doRedeem(); } });
+
     copyBtn.disabled = saveBtn.disabled = shareBtn.disabled = true;
     mergeBtn.disabled = replaceBtn.disabled = true;
     refreshExport();
@@ -6085,7 +6151,7 @@ var FigurenArt = (function () {
     id: "spielstand",
     name: "Spielstand",
     start: start,
-    _engine: { isKnownKey: isKnownKey, validValue: validValue, makeCode: makeCode, parseCode: parseCode, mergeValue: mergeValue, applyImport: applyImport, readLocal: readLocal, summarize: summarize }
+    _engine: { redeem: redeem, isKnownKey: isKnownKey, validValue: validValue, makeCode: makeCode, parseCode: parseCode, mergeValue: mergeValue, applyImport: applyImport, readLocal: readLocal, summarize: summarize }
   });
 })();
 
@@ -6535,7 +6601,7 @@ var FigurenArt = (function () {
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
   var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
-  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level";
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag";
 
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
@@ -6608,6 +6674,35 @@ var FigurenArt = (function () {
   // - spät und tief getroffen oder den Schläger nach hinten ziehen: Unterschnitt
   // - Schläger beim Treffer seitlich bewegt: Seitenspin
   // Je schneller der Schläger, desto mehr Drall.
+  // Ausrüstung: Das Holz bestimmt das Tempo deiner Schläge, der Belag den Spin.
+  // Werte sind Spielwerte, angelehnt an den Charakter der Butterfly-Produkte (1,00 = Grundwert).
+  // speed: Tempo, ctl: Kontrolle (weniger Streuung), spin: Drall, flat: Tempo des Belags
+  var BLADES = [
+    { id: "primorac", name: "Primorac", speed: 0.84, ctl: 1.25 },
+    { id: "tb-caf", name: "Timo Boll CAF", speed: 0.93, ctl: 1.12 },
+    { id: "tb-alc", name: "Timo Boll ALC", speed: 1.00, ctl: 1.00 },
+    { id: "innerforce", name: "Innerforce ALC", speed: 1.03, ctl: 1.10 },
+    { id: "viscaria", name: "Viscaria", speed: 1.08, ctl: 0.95 },
+    { id: "zjk", name: "Zhang Jike Super ZLC", speed: 1.15, ctl: 0.82 }
+  ];
+  var RUBBERS = [
+    { id: "flextra", name: "Flextra", spin: 0.70, speed: 0.88, ctl: 1.30 },
+    { id: "sriver", name: "Sriver", spin: 0.85, speed: 0.92, ctl: 1.20 },
+    { id: "glayzer", name: "Glayzer", spin: 0.95, speed: 0.98, ctl: 1.15 },
+    { id: "rozena", name: "Rozena", spin: 1.05, speed: 1.03, ctl: 1.02 },
+    { id: "ten05", name: "Tenergy 05", spin: 1.00, speed: 1.00, ctl: 1.00 },
+    { id: "ten64", name: "Tenergy 64", spin: 1.06, speed: 0.96, ctl: 1.08 },
+    { id: "ten80", name: "Tenergy 80", spin: 0.98, speed: 1.07, ctl: 0.96 },
+    { id: "dig05", name: "Dignics 05", spin: 1.18, speed: 1.06, ctl: 0.95 },
+    { id: "dig09c", name: "Dignics 09C", spin: 1.25, speed: 1.02, ctl: 0.90 }
+  ];
+  var GEAR = { V: 1, ctl: 1, spin: 1 };      // Gesamtwirkung der gewählten Ausrüstung
+  function setGear(blade, rubber) {
+    GEAR.V = blade.speed * rubber.speed;
+    GEAR.ctl = blade.ctl * rubber.ctl;
+    GEAR.spin = rubber.spin;
+  }
+
   function computeSpin(p, ct) {
     var core = PR + R;
     var f = clamp(Math.sqrt(p.sx * p.sx + p.sy * p.sy) / 600, 0.15, 1);
@@ -6616,7 +6711,8 @@ var FigurenArt = (function () {
     var sd = clamp(clamp(p.sy / 650, -1, 1) * 0.9 + clamp(ct.ry / core, -1, 1) * 0.25 * f, -1, 1);
     if (Math.abs(sp) < 0.1) sp = 0;
     if (Math.abs(sd) < 0.12) sd = 0;
-    return { sp: sp, sd: sd };
+    // Der Belag verstärkt oder dämpft den Drall, der aus deiner Bewegung entsteht
+    return { sp: clamp(sp * GEAR.spin, -1.3, 1.3), sd: clamp(sd * GEAR.spin, -1.3, 1.3) };
   }
 
   function segDist2(ax, ay, bx, by, cx, cy) {
@@ -6632,6 +6728,9 @@ var FigurenArt = (function () {
     ".tt-lobby p{margin:0 0 0.8rem}" +
     ".tt-lobby .row{margin:0.4rem 0 1rem;align-items:center}" +
     ".tt-lobby input[type=text]{width:9rem;font:600 1.4rem/1.2 var(--serif,Georgia,serif);letter-spacing:0.25em;text-transform:uppercase;text-align:center}" +
+    ".tt-gear{display:flex;flex-wrap:wrap;gap:0.6rem 1.4rem;margin:0.2rem 0 0.4rem}" +
+    ".tt-gear label{display:flex;flex-direction:column;gap:0.25rem;font-weight:600}" +
+    ".tt-gear select{min-width:11rem;font:inherit;font-weight:500;padding:0.45rem 0.6rem;border:1px solid var(--line,#b9cdd2);border-radius:0.5rem;background:var(--panel,#fff);color:var(--ink,#17313a)}" +
     ".tt-bar{margin:0 0 0.8rem}" +
     ".tt-code{display:inline-block;font:700 1.9rem/1.2 var(--serif,Georgia,serif);letter-spacing:0.3em;padding:0.1em 0.35em 0.1em 0.5em;border:2px dashed var(--accent);border-radius:0.5rem;margin:0.2rem 0.8rem 0.4rem 0}" +
     ".tt-bar .row{margin:0.4rem 0 0}";
@@ -6689,6 +6788,58 @@ var FigurenArt = (function () {
     });
     levelGroup.mark(levelId);
 
+    // Ausrüstung: Holz bestimmt das Tempo, Belag den Spin
+    var blade = BLADES[2], rubber = RUBBERS[4];
+    try {
+      var sb = localStorage.getItem(BLADE_KEY), sr = localStorage.getItem(RUBBER_KEY);
+      BLADES.forEach(function (x) { if (x.id === sb) blade = x; });
+      RUBBERS.forEach(function (x) { if (x.id === sr) rubber = x; });
+    } catch (e) {}
+    setGear(blade, rubber);
+
+    var gearBox = document.createElement("div");
+    gearBox.className = "tt-gear";
+    function gearSelect(id, label, list, current, onPick) {
+      var wrap = document.createElement("label");
+      wrap.htmlFor = id;
+      wrap.textContent = label;
+      var sel = document.createElement("select");
+      sel.id = id;
+      list.forEach(function (x) {
+        var o = document.createElement("option");
+        o.value = x.id; o.textContent = x.name;
+        if (x === current) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.addEventListener("change", function () {
+        list.forEach(function (x) { if (x.id === sel.value) onPick(x); });
+        sel.blur();
+        canvas.focus({ preventScroll: true });
+      });
+      wrap.appendChild(sel);
+      return wrap;
+    }
+    var gearInfo = document.createElement("p");
+    gearInfo.className = "msg";
+    gearInfo.setAttribute("aria-live", "polite");
+    function rate(v, lo, hi) {
+      return ["sehr niedrig", "niedrig", "mittel", "hoch", "sehr hoch"][clamp(Math.round((v - lo) / (hi - lo) * 4), 0, 4)];
+    }
+    function showGear() {
+      gearInfo.textContent = "Holz " + blade.name + ": Tempo " + rate(blade.speed, 0.82, 1.17) + ", Kontrolle " + rate(blade.ctl, 0.8, 1.27) +
+        ". Belag " + rubber.name + ": Spin " + rate(rubber.spin, 0.68, 1.27) + ", Tempo " + rate(rubber.speed, 0.86, 1.09) + ", Kontrolle " + rate(rubber.ctl, 0.88, 1.32) +
+        ". Wie hart und mit wie viel Spin der Ball fliegt, hängt weiter von deinem Schlägertempo und der Bewegungsrichtung beim Treffen ab.";
+    }
+    gearBox.appendChild(gearSelect("tt-blade", "Holz", BLADES, blade, function (x) {
+      blade = x; setGear(blade, rubber); showGear();
+      try { localStorage.setItem(BLADE_KEY, x.id); } catch (e) {}
+    }));
+    gearBox.appendChild(gearSelect("tt-rubber", "Belag", RUBBERS, rubber, function (x) {
+      rubber = x; setGear(blade, rubber); showGear();
+      try { localStorage.setItem(RUBBER_KEY, x.id); } catch (e) {}
+    }));
+    showGear();
+
     var info = document.createElement("p");
     info.className = "msg";
     info.setAttribute("aria-live", "polite");
@@ -6731,7 +6882,7 @@ var FigurenArt = (function () {
 
     var help = document.createElement("p");
     help.className = "hint";
-    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Online: Eine Person erstellt eine Partie und schickt den Code, die andere gibt ihn ein. Beide sehen sich selbst unten. Wer den Ball zuletzt gespielt hat, wartet auf die Entscheidung des Gegners.";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Ausrüstung: Das Holz bestimmt das Tempo deiner Schläge, der Belag den Spin. Dein eigenes Schlägertempo und die Bewegungsrichtung beim Treffen zählen aber immer noch. Online: Eine Person erstellt eine Partie und schickt den Code, die andere gibt ihn ein. Beide sehen sich selbst unten. Wer den Ball zuletzt gespielt hat, wartet auf die Entscheidung des Gegners.";
 
     var modeGroup = chipGroup("Spielmodus", { cpu: "Gegen den Computer", online: "Online mit Code" }, function (id) { setMode(id); });
     modeGroup.mark("cpu");
@@ -6794,6 +6945,8 @@ var FigurenArt = (function () {
 
     box.appendChild(modeGroup.el);
     box.appendChild(levelGroup.el);
+    box.appendChild(gearBox);
+    box.appendChild(gearInfo);
     box.appendChild(lobby);
     box.appendChild(bar);
     box.appendChild(canvas);
@@ -6902,6 +7055,8 @@ var FigurenArt = (function () {
       aimRow.style.display = lob ? "none" : "";
       row.style.display = lob ? "none" : "";
       levelGroup.el.style.display = online ? "none" : "";
+      gearBox.style.display = lob ? "none" : "";
+      gearInfo.style.display = lob ? "none" : "";
       startBtn.style.display = online && !S.over ? "none" : "";
       if (net) {
         codeShow.textContent = net.code;
@@ -7147,16 +7302,17 @@ var FigurenArt = (function () {
       var q = d <= core ? 1 : 1 - 0.45 * clamp((d - core) / (PREACH - core), 0, 1);
       var power = clamp(clamp(p.sx / 520, 0, 1) + clamp(Math.abs(p.sy) / 900, 0, 0.3), 0, 1);
       var mix = 0.7 + 0.3 * q;
-      var x1 = TL + 100 + 130 * power * mix;                         // erster Aufsprung auf deiner Hälfte
+      var V = GEAR.V, pw = clamp(power * V, 0, 1.2);
+      var x1 = TL + 100 + 130 * pw * mix;                            // erster Aufsprung auf deiner Hälfte
       var slope = clamp(ct.ry / PREACH * 0.9 + Math.tan(aim), -0.85, 0.85);   // Aufschlagwinkel (drehbar) und Treffpunkt
       var y1 = clamp(b.y + slope * (x1 - b.x) + p.sy * 0.05, TT + 14, TB - 14);
-      var xt2 = NETX + 50 + 190 * power * mix;                       // zweiter Aufsprung beim Gegner
+      var xt2 = NETX + 50 + 190 * pw * mix;                          // zweiter Aufsprung beim Gegner
       var raw = b.y + slope * (xt2 - b.x) * 0.9 + p.sy * 0.1;
       var yt2 = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.55 + (1 - q) * 60 * (Math.random() * 2 - 1);
-      xt2 += (1 - q) * 30 * (Math.random() * 2 - 1);
+      xt2 += (1 - q) * 30 * (Math.random() * 2 - 1) / GEAR.ctl;
       var spin = computeSpin(p, ct), sp = spin.sp, sd = spin.sd;
-      var T1 = 0.5 - 0.1 * power;
-      return { v1: plan(b.x, b.y, b.z, x1, y1, T1, sp, sd), xt2: xt2, yt2: yt2, T2: 0.62 - 0.14 * power, sp: sp, sd: sd, q: q, power: power };
+      var T1 = (0.5 - 0.1 * power) / Math.sqrt(V);
+      return { v1: plan(b.x, b.y, b.z, x1, y1, T1, sp, sd), xt2: xt2, yt2: yt2, T2: (0.62 - 0.14 * power) / Math.sqrt(V), sp: sp, sd: sd, q: q, power: power };
     }
 
     function playerServe(ct) {
@@ -7269,14 +7425,15 @@ var FigurenArt = (function () {
       var power = clamp(clamp(p.sx / 520, 0, 1) * 0.85 + clamp(Math.abs(p.sy) / 900, 0, 0.25) + clamp(inSp / 1100, 0, 1) * 0.2, 0, 1);
       var smash = b.z >= 30 && p.sx > 260 && q > 0.75;            // hoher Ball und schneller Schlag nach vorn
       if (smash) power = clamp(power + 0.25, 0, 1);
-      var xt = NETX + 60 + 175 * power * (0.6 + 0.4 * q);
+      var V = GEAR.V;                                             // Holz und Belag: Tempo des Schlags
+      var xt = NETX + 60 + 175 * clamp(power * V, 0, 1.2) * (0.6 + 0.4 * q);
       // Richtung: Schlagrichtung des Schlägers und Treffpunkt auf dem Blatt
       var swingSlope = clamp(p.sy / Math.max(140, Math.abs(p.sx)), -0.8, 0.8);
       var slope = clamp(ct.ry / PREACH * 0.7 + swingSlope * 0.55, -0.8, 0.8);
       var raw = b.y + slope * (xt - b.x);
       var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.5;  // leichte Hilfe, den Ball auf die Platte zu bringen
       // Ungenauigkeit: schlechter Treffpunkt und sehr schnelle Schläge nehmen Kontrolle
-      var loose = (1 - q) * 70 + clamp((swing - 450) / 600, 0, 1) * 18;
+      var loose = ((1 - q) * 70 + clamp((swing - 450) / 600, 0, 1) * 18) / GEAR.ctl + Math.max(0, V - 1) * 50;
       yt += loose * (Math.random() * 2 - 1);
       xt += loose * 0.55 * (Math.random() * 2 - 1);
       var spin = computeSpin(p, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
@@ -7285,7 +7442,7 @@ var FigurenArt = (function () {
       xt += clamp(b.sp, -1, 1) * 28 * (1 - 0.6 * clamp(-p.sx / 200, 0, 1));
       yt += clamp(b.sd, -1, 1) * 22;
       xt = clamp(xt, NETX + 30, TR + 40);
-      var T = Math.max(0.42, 0.74 - 0.24 * power - (smash ? 0.1 : 0));
+      var T = Math.max(0.36, (0.74 - 0.24 * power - (smash ? 0.1 : 0)) / V);
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("L");
       S.frozen = false; S.pend = null;
@@ -7595,7 +7752,7 @@ var FigurenArt = (function () {
         ctx.fillRect(cx - half, y, half * 2, 8);
         ctx.globalAlpha = 1;
         ctx.fillStyle = color;
-        var len = clamp(val, -1, 1) * half;
+        var len = clamp(val, -1.3, 1.3) * half * 0.77;
         ctx.fillRect(len >= 0 ? cx : cx + len, y, Math.abs(len), 8);
         ctx.fillStyle = ink;
         ctx.fillRect(cx - 0.5, y - 2, 1, 12);
@@ -7798,6 +7955,8 @@ var FigurenArt = (function () {
       ctx.fillStyle = "#fff";
       ctx.fillText(oppName() + " " + S.score.R, 18, 36);
       ctx.fillText("Du " + S.score.L, 18, CH - 20);
+      ctx.font = "600 11px Georgia, serif";
+      ctx.fillText(blade.name + " + " + rubber.name, 18, CH - 48, 180);
       if (S.over) { S.endAt = S.endAt || now; drawEnd(S.score.L > S.score.R, (now - S.endAt) / 1000); } else S.endAt = 0;
       if (banner) {
         ctx.font = "700 20px Georgia, serif";
