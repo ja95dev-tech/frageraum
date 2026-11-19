@@ -5452,6 +5452,421 @@ var FigurenArt = (function () {
 })();
 
 ;
+// ===== minesweeper.js =====
+// Spiel: Minesweeper (Minen finden, ohne eine zu berühren)
+(function () {
+  "use strict";
+
+  var LEVELS = {
+    leicht: { name: "Leicht", rows: 9, cols: 9, mines: 10 },
+    mittel: { name: "Mittel", rows: 16, cols: 16, mines: 40 },
+    schwer: { name: "Schwer", rows: 16, cols: 30, mines: 99 }
+  };
+  var LEVEL_KEY = "minen-level";
+  function timeKey(id) { return "minen-zeit-" + id; }
+
+  var CSS =
+    ".ms-wrap{max-width:100%;overflow-x:auto;padding:0.25rem 0 0.75rem}" +
+    ".ms-grid{display:grid;gap:2px;width:max-content;padding:4px;border-radius:0.6rem;background:color-mix(in srgb, var(--ink,#17313a) 22%, var(--panel,#fff))}" +
+    ".ms-cell{box-sizing:border-box;width:var(--cs);height:var(--cs);min-width:0;padding:0;margin:0;display:grid;place-items:center;border-radius:4px;" +
+    "border:1px solid color-mix(in srgb, var(--ink,#17313a) 28%, transparent);cursor:pointer;font:700 calc(var(--cs) * 0.56)/1 Georgia,serif;" +
+    "background:color-mix(in srgb, var(--accent,#2447d6) 20%, var(--panel,#fff));color:var(--ink,#17313a);touch-action:manipulation;user-select:none;-webkit-user-select:none}" +
+    ".ms-cell:hover{background:color-mix(in srgb, var(--accent,#2447d6) 32%, var(--panel,#fff))}" +
+    ".ms-cell.open{cursor:default;background:var(--panel,#fff);border-color:color-mix(in srgb, var(--ink,#17313a) 12%, transparent)}" +
+    ".ms-cell.open:hover{background:var(--panel,#fff)}" +
+    ".ms-cell.boom{background:#d6402b;color:#fff}" +
+    ".ms-cell.wrong{background:color-mix(in srgb, #d6402b 35%, var(--panel,#fff))}" +
+    ".ms-cell.hint-safe{outline:3px solid #1f8a4c;outline-offset:-2px}" +
+    ".ms-cell.hint-mine{outline:3px solid #d6402b;outline-offset:-2px}" +
+    ".ms-cell:focus-visible{outline:3px solid var(--accent,#2447d6);outline-offset:1px;position:relative}" +
+    ".ms-cell.n1{color:color-mix(in srgb, #2447d6 70%, var(--ink,#17313a))}" +
+    ".ms-cell.n2{color:color-mix(in srgb, #1f8a4c 70%, var(--ink,#17313a))}" +
+    ".ms-cell.n3{color:color-mix(in srgb, #d6402b 70%, var(--ink,#17313a))}" +
+    ".ms-cell.n4{color:color-mix(in srgb, #6a2fb0 70%, var(--ink,#17313a))}" +
+    ".ms-cell.n5{color:color-mix(in srgb, #9a5a0c 70%, var(--ink,#17313a))}" +
+    ".ms-cell.n6{color:color-mix(in srgb, #0e8a8a 70%, var(--ink,#17313a))}" +
+    ".ms-cell.n7{color:var(--ink,#17313a)}" +
+    ".ms-cell.n8{color:color-mix(in srgb, #6b7280 80%, var(--ink,#17313a))}" +
+    ".ms-bar{display:flex;flex-wrap:wrap;gap:0.5rem 1.4rem;align-items:center;margin:0 0 0.6rem;font-weight:700}" +
+    ".ms-bar span{font-variant-numeric:tabular-nums}";
+
+  function fmtTime(ms) {
+    return (ms / 1000).toFixed(1).replace(".", ",") + " s";
+  }
+
+  function start(box) {
+    if (!document.getElementById("ms-style")) {
+      var st = document.createElement("style");
+      st.id = "ms-style";
+      st.textContent = CSS;
+      document.head.appendChild(st);
+    }
+    var levelId = "mittel";
+    try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
+
+    var rows, cols, total, mineCount;
+    var mine, adj, state, started, over, won, opened, flags, t0, elapsed, timer, hintUsed, flagMode, cur;
+    var cells = [];
+
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text) e.textContent = text;
+      return e;
+    }
+
+    // ---------- Oberfläche ----------
+    var chips = el("div", "chips");
+    chips.setAttribute("role", "group");
+    chips.setAttribute("aria-label", "Schwierigkeit");
+    var chipEls = {};
+    Object.keys(LEVELS).forEach(function (id) {
+      var L = LEVELS[id];
+      var b = el("button", "chip", L.name + " (" + L.cols + "×" + L.rows + ", " + L.mines + " Minen)");
+      b.type = "button";
+      b.addEventListener("click", function () {
+        levelId = id;
+        try { localStorage.setItem(LEVEL_KEY, id); } catch (e) {}
+        markLevel();
+        newGame();
+      });
+      chipEls[id] = b;
+      chips.appendChild(b);
+    });
+    function markLevel() {
+      Object.keys(chipEls).forEach(function (id) { chipEls[id].setAttribute("aria-pressed", String(id === levelId)); });
+    }
+
+    var bar = el("div", "ms-bar");
+    var minesOut = el("span"), timeOut = el("span"), bestOut = el("span");
+    bar.appendChild(minesOut); bar.appendChild(timeOut); bar.appendChild(bestOut);
+
+    var wrap = el("div", "ms-wrap");
+    var grid = el("div", "ms-grid");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", "Minenfeld");
+    wrap.appendChild(grid);
+
+    var info = el("p", "msg");
+    info.setAttribute("aria-live", "polite");
+    var row = el("div", "row");
+    var newBtn = el("button", "", "Neue Runde");
+    newBtn.type = "button";
+    var flagBtn = el("button", "link", "Flaggen setzen: aus");
+    flagBtn.type = "button";
+    flagBtn.setAttribute("aria-pressed", "false");
+    var hintBtn = el("button", "link", "Tipp");
+    hintBtn.type = "button";
+    row.appendChild(newBtn); row.appendChild(flagBtn); row.appendChild(hintBtn);
+    var help = el("p", "msg", "Klicke ein Feld an, um es aufzudecken. Eine Zahl zeigt, wie viele Minen in den acht Nachbarfeldern liegen. Setze mit Rechtsklick, gedrückt halten oder dem Schalter „Flaggen setzen“ eine Flagge auf ein Feld, das du für eine Mine hältst. Klickst du eine Zahl an, deren Flaggen schon stimmen, deckt das Spiel die übrigen Nachbarn auf. Der erste Klick ist immer sicher. Tastatur: Pfeiltasten zum Bewegen, Leertaste zum Aufdecken, F für eine Flagge. Ein Tipp zeigt einen sicheren Zug oder eine sichere Mine, dann zählt die Zeit aber nicht mehr als Rekord.");
+
+    box.appendChild(chips);
+    box.appendChild(bar);
+    box.appendChild(wrap);
+    box.appendChild(info);
+    box.appendChild(row);
+    box.appendChild(help);
+
+    function say(t) { info.textContent = t; }
+
+    // ---------- Spiellogik ----------
+    function neighbors(i) {
+      var r = Math.floor(i / cols), c = i % cols, out = [];
+      for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        var rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < rows && cc >= 0 && cc < cols) out.push(rr * cols + cc);
+      }
+      return out;
+    }
+
+    function bestTime() {
+      try { var v = Number(localStorage.getItem(timeKey(levelId))); return v > 0 ? v : 0; } catch (e) { return 0; }
+    }
+
+    function buildGrid() {
+      var L = LEVELS[levelId];
+      rows = L.rows; cols = L.cols; mineCount = L.mines; total = rows * cols;
+      grid.textContent = "";
+      cells = [];
+      var avail = Math.max(240, (box.clientWidth || 600));
+      var cs = Math.max(avail < 520 ? 28 : 20, Math.min(38, Math.floor((avail - 16) / cols) - 2));
+      grid.style.setProperty("--cs", cs + "px");
+      grid.style.gridTemplateColumns = "repeat(" + cols + ", var(--cs))";
+      for (var i = 0; i < total; i++) {
+        var b = el("button", "ms-cell");
+        b.type = "button";
+        b.dataset.i = String(i);
+        b.tabIndex = i === 0 ? 0 : -1;
+        grid.appendChild(b);
+        cells.push(b);
+      }
+      cur = 0;
+    }
+
+    function newGame() {
+      clearInterval(timer);
+      timer = null;
+      buildGrid();
+      mine = new Array(total).fill(0);
+      adj = new Array(total).fill(0);
+      state = new Array(total).fill(0);      // 0 verdeckt, 1 offen, 2 Flagge
+      started = false; over = false; won = false; opened = 0; flags = 0; elapsed = 0; hintUsed = false;
+      render();
+      say("Klicke ein Feld an. Der erste Klick ist sicher.");
+    }
+
+    function placeMines(safe) {
+      var banned = {};
+      banned[safe] = true;
+      var around = neighbors(safe);
+      if (total - 1 - around.length >= mineCount) around.forEach(function (n) { banned[n] = true; });
+      var free = [];
+      for (var i = 0; i < total; i++) if (!banned[i]) free.push(i);
+      for (var k = free.length - 1; k > 0; k--) {          // mischen
+        var j = Math.floor(Math.random() * (k + 1)), tmp = free[k]; free[k] = free[j]; free[j] = tmp;
+      }
+      for (var m = 0; m < mineCount; m++) mine[free[m]] = 1;
+      for (var a = 0; a < total; a++) {
+        var n = 0;
+        neighbors(a).forEach(function (x) { n += mine[x]; });
+        adj[a] = n;
+      }
+    }
+
+    function beginTimer() {
+      t0 = performance.now();
+      say("");
+      timer = setInterval(function () { elapsed = performance.now() - t0; renderBar(); }, 100);
+    }
+
+    function lose(hit) {
+      over = true;
+      clearInterval(timer); timer = null;
+      elapsed = performance.now() - t0;
+      for (var i = 0; i < total; i++) if (mine[i] && state[i] !== 2) state[i] = 1;
+      cur = hit;
+      render(hit);
+      say("Das war eine Mine. Die Runde ist verloren. Starte mit „Neue Runde“ noch einmal.");
+    }
+
+    function win() {
+      over = true; won = true;
+      clearInterval(timer); timer = null;
+      elapsed = performance.now() - t0;
+      for (var i = 0; i < total; i++) if (mine[i]) state[i] = 2;
+      flags = mineCount;
+      var msg = "Geschafft in " + fmtTime(elapsed) + ".";
+      if (!hintUsed) {
+        var best = bestTime();
+        if (!best || elapsed < best) {
+          try { localStorage.setItem(timeKey(levelId), String(Math.round(elapsed))); } catch (e) {}
+          msg += best ? " Neuer Rekord, vorher " + fmtTime(best) + "." : " Das ist dein erster Rekord.";
+        } else msg += " Dein Rekord: " + fmtTime(best) + ".";
+      } else msg += " Mit Tipp, deshalb zählt die Zeit nicht als Rekord.";
+      render();
+      say(msg);
+    }
+
+    function reveal(i) {
+      if (over || state[i] !== 0) return;
+      if (!started) { started = true; placeMines(i); beginTimer(); }
+      if (mine[i]) { state[i] = 1; lose(i); return; }
+      var stack = [i];
+      while (stack.length) {
+        var k = stack.pop();
+        if (state[k] !== 0) continue;
+        state[k] = 1; opened++;
+        if (adj[k] === 0) neighbors(k).forEach(function (n) { if (state[n] === 0) stack.push(n); });
+      }
+      clearHints();
+      if (opened === total - mineCount) win(); else render();
+    }
+
+    function toggleFlag(i) {
+      if (over || state[i] === 1) return;
+      if (state[i] === 0) { state[i] = 2; flags++; } else { state[i] = 0; flags--; }
+      clearHints();
+      render();
+    }
+
+    function chord(i) {
+      if (over || state[i] !== 1 || adj[i] === 0) return;
+      var nb = neighbors(i), f = 0;
+      nb.forEach(function (n) { if (state[n] === 2) f++; });
+      if (f !== adj[i]) return;
+      for (var k = 0; k < nb.length && !over; k++) if (state[nb[k]] === 0) reveal(nb[k]);
+    }
+
+    // ---------- Tipp: einfache Logik ----------
+    var hintCell = -1, hintKind = "";
+    function clearHints() { hintCell = -1; hintKind = ""; }
+
+    function findHint() {
+      var info2 = [];
+      for (var i = 0; i < total; i++) {
+        if (state[i] !== 1 || adj[i] === 0) continue;
+        var hid = [], f = 0;
+        neighbors(i).forEach(function (n) { if (state[n] === 0) hid.push(n); else if (state[n] === 2) f++; });
+        if (!hid.length) continue;
+        var rem = adj[i] - f;
+        if (rem === 0) return { kind: "safe", i: hid[0] };
+        if (rem === hid.length) return { kind: "mine", i: hid[0] };
+        info2.push({ hid: hid, rem: rem });
+      }
+      // Vergleich zweier Zahlen: liegen die verdeckten Nachbarn der einen ganz in denen der anderen
+      for (var a = 0; a < info2.length; a++) {
+        for (var b = 0; b < info2.length; b++) {
+          if (a === b) continue;
+          var A = info2[a], B = info2[b];
+          if (A.hid.length >= B.hid.length) continue;
+          var sub = A.hid.every(function (x) { return B.hid.indexOf(x) >= 0; });
+          if (!sub) continue;
+          var diff = B.hid.filter(function (x) { return A.hid.indexOf(x) < 0; });
+          var dr = B.rem - A.rem;
+          if (dr === 0) return { kind: "safe", i: diff[0] };
+          if (dr === diff.length) return { kind: "mine", i: diff[0] };
+        }
+      }
+      return null;
+    }
+
+    function hint() {
+      if (over) return;
+      if (!started) { say("Mache erst den ersten Klick, dann kann ich einen Tipp geben."); return; }
+      var h = findHint();
+      if (!h) { say("Ich finde mit einfacher Logik keinen sicheren Zug. Du musst jetzt raten."); return; }
+      hintUsed = true;
+      hintCell = h.i; hintKind = h.kind;
+      render();
+      cells[h.i].focus();
+      say(h.kind === "safe" ? "Dieses Feld ist sicher (grün markiert)." : "Auf diesem Feld liegt eine Mine (rot markiert). Setze eine Flagge.");
+    }
+
+    // ---------- Darstellung ----------
+    function renderBar() {
+      minesOut.textContent = "Minen: " + (mineCount - flags);
+      timeOut.textContent = "Zeit: " + fmtTime(started ? (over ? elapsed : performance.now() - t0) : 0);
+      var b = bestTime();
+      bestOut.textContent = b ? "Rekord: " + fmtTime(b) : "";
+    }
+
+    function cellLabel(i) {
+      var r = Math.floor(i / cols) + 1, c = i % cols + 1, pos = "Reihe " + r + ", Spalte " + c + ": ";
+      if (state[i] === 2) return pos + (over && !won && !mine[i] ? "falsche Flagge" : "Flagge");
+      if (state[i] === 0) return pos + "verdeckt";
+      if (mine[i]) return pos + "Mine";
+      return pos + (adj[i] ? adj[i] + (adj[i] === 1 ? " Mine in der Nähe" : " Minen in der Nähe") : "leer");
+    }
+
+    function render(boom) {
+      for (var i = 0; i < total; i++) {
+        var b = cells[i], s = state[i], cls = "ms-cell", txt = "";
+        if (s === 1) {
+          cls += " open";
+          if (mine[i]) { txt = "💣"; if (i === boom) cls += " boom"; }
+          else if (adj[i]) { txt = String(adj[i]); cls += " n" + adj[i]; }
+        } else if (s === 2) {
+          txt = "🚩";
+          if (over && !won && !mine[i]) { cls += " wrong"; txt = "✕"; }
+        }
+        if (i === hintCell) cls += hintKind === "safe" ? " hint-safe" : " hint-mine";
+        if (b.className !== cls) b.className = cls;
+        if (b.textContent !== txt) b.textContent = txt;
+        b.setAttribute("aria-label", cellLabel(i));
+      }
+      renderBar();
+    }
+
+    // ---------- Eingabe ----------
+    var pressTimer = null, longDone = false;
+    function cellOf(e) {
+      var t = e.target;
+      while (t && t !== grid && !(t.dataset && t.dataset.i !== undefined)) t = t.parentNode;
+      return t && t.dataset && t.dataset.i !== undefined ? Number(t.dataset.i) : -1;
+    }
+
+    grid.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse") return;
+      var i = cellOf(e);
+      if (i < 0) return;
+      longDone = false;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(function () { longDone = true; toggleFlag(i); if (navigator.vibrate) { try { navigator.vibrate(20); } catch (x) {} } }, 420);
+    });
+    ["pointerup", "pointercancel", "pointerleave", "pointermove"].forEach(function (ev) {
+      grid.addEventListener(ev, function (e) { if (ev === "pointermove" && !e.buttons) return; clearTimeout(pressTimer); });
+    });
+    grid.addEventListener("contextmenu", function (e) {
+      e.preventDefault();
+      var i = cellOf(e);
+      if (i >= 0) toggleFlag(i);
+    });
+    grid.addEventListener("click", function (e) {
+      var i = cellOf(e);
+      if (i < 0) return;
+      cur = i;
+      if (longDone) { longDone = false; return; }
+      if (state[i] === 1) { chord(i); return; }
+      if (flagMode) toggleFlag(i);
+      else if (state[i] === 0) reveal(i);
+      else toggleFlag(i);                                   // ein Klick auf eine Flagge nimmt sie weg
+    });
+
+    function focusCell(i) {
+      if (i < 0 || i >= total) return;
+      cells[cur].tabIndex = -1;
+      cur = i;
+      cells[i].tabIndex = 0;
+      cells[i].focus();
+    }
+    grid.addEventListener("focusin", function (e) {
+      var i = cellOf(e);
+      if (i >= 0 && i !== cur) { cells[cur].tabIndex = -1; cur = i; cells[i].tabIndex = 0; }
+    });
+    grid.addEventListener("keydown", function (e) {
+      var i = cellOf(e);
+      if (i < 0) return;
+      var r = Math.floor(i / cols), c = i % cols, k = e.key;
+      if (k === "ArrowLeft" && c > 0) focusCell(i - 1);
+      else if (k === "ArrowRight" && c < cols - 1) focusCell(i + 1);
+      else if (k === "ArrowUp" && r > 0) focusCell(i - cols);
+      else if (k === "ArrowDown" && r < rows - 1) focusCell(i + cols);
+      else if (k === "f" || k === "F") toggleFlag(i);
+      else return;
+      e.preventDefault();
+    });
+
+    newBtn.addEventListener("click", newGame);
+    hintBtn.addEventListener("click", hint);
+    flagBtn.addEventListener("click", function () {
+      flagMode = !flagMode;
+      flagBtn.textContent = "Flaggen setzen: " + (flagMode ? "an" : "aus");
+      flagBtn.setAttribute("aria-pressed", String(flagMode));
+    });
+    function onResize() { /* Feldgröße bleibt, die Fläche scrollt bei Bedarf */ }
+    window.addEventListener("resize", onResize);
+
+    flagMode = false;
+    markLevel();
+    newGame();
+
+    return function stop() {
+      clearInterval(timer);
+      clearTimeout(pressTimer);
+      window.removeEventListener("resize", onResize);
+    };
+  }
+
+  (window.Spiele = window.Spiele || []).push({
+    id: "minesweeper",
+    name: "Minesweeper",
+    start: start,
+    _engine: { LEVELS: LEVELS, timeKey: timeKey }
+  });
+})();
+
+;
 // ===== snake.js =====
 // Spiel: Snake
 // Jedes Spiel registriert sich selbst in window.Spiele und liefert eine stop()-Funktion zurück.
@@ -5653,8 +6068,9 @@ var FigurenArt = (function () {
 (function () {
   "use strict";
 
-  var FIXED = ["snake-best", "2048-best", "rennen-best", "quallen-best", "quallenimperium-v1", "wortraten-v1", "farben", "helligkeit", "tischtennis-best", "flaggen-best-leicht", "flaggen-best-alle", "flaggen-best-europa", "flaggen-best-asien", "flaggen-best-afrika", "flaggen-best-amerika", "flaggen-best-ozeanien"];
+  var FIXED = ["snake-best", "2048-best", "rennen-best", "quallen-best", "quallenimperium-v1", "wortraten-v1", "farben", "helligkeit", "tischtennis-best", "minen-zeit-leicht", "minen-zeit-mittel", "minen-zeit-schwer", "flaggen-best-leicht", "flaggen-best-alle", "flaggen-best-europa", "flaggen-best-asien", "flaggen-best-afrika", "flaggen-best-amerika", "flaggen-best-ozeanien"];
   var BEST_KEYS = ["snake-best", "2048-best", "rennen-best", "quallen-best", "tischtennis-best", "flaggen-best-leicht", "flaggen-best-alle", "flaggen-best-europa", "flaggen-best-asien", "flaggen-best-afrika", "flaggen-best-amerika", "flaggen-best-ozeanien"];
+  var MINEN_KEYS = ["minen-zeit-leicht", "minen-zeit-mittel", "minen-zeit-schwer"];
   var TRACK = /^rennstrecke:\d{1,6}$/;
   var MAX_VALUE = 200000;
 
@@ -5666,7 +6082,7 @@ var FigurenArt = (function () {
 
   function validValue(k, v) {
     if (typeof v !== "string" || v.length > MAX_VALUE) return false;
-    if (/-best$/.test(k)) return /^\d{1,12}$/.test(v);
+    if (/-best$/.test(k) || /^minen-zeit-/.test(k)) return /^\d{1,12}$/.test(v);
     if (k === "helligkeit") return v === "auto" || v === "light" || v === "dark";
     if (k === "farben") {
       var a = parseJson(v);
@@ -5710,6 +6126,9 @@ var FigurenArt = (function () {
     var best = BEST_KEYS.map(function (k) { return data[k] !== undefined ? Number(data[k]) : null; });
     if (best.some(function (x) { return x !== null; })) c.b = best;
 
+    var mz = MINEN_KEYS.map(function (k) { return data[k] !== undefined ? Number(data[k]) : null; });
+    if (mz.some(function (x) { return x !== null; })) c.m = mz;
+
     var tracks = Object.keys(data).filter(function (k) { return TRACK.test(k); }).map(function (k) {
       var r = JSON.parse(data[k]);
       return [Number(k.split(":")[1]), round2(r.lap), round2(r.total)];
@@ -5737,6 +6156,7 @@ var FigurenArt = (function () {
 
   function expand(c) {
     var data = {};
+    if (c.m) MINEN_KEYS.forEach(function (k, i) { if (c.m[i] !== null && c.m[i] !== undefined) data[k] = String(Math.floor(c.m[i])); });
     if (c.b) BEST_KEYS.forEach(function (k, i) { if (c.b[i] !== null && c.b[i] !== undefined) data[k] = String(Math.floor(c.b[i])); });
     (c.r || []).forEach(function (t) { data["rennstrecke:" + t[0]] = JSON.stringify({ lap: t[1], total: t[2] }); });
     if (c.i) {
@@ -5836,6 +6256,7 @@ var FigurenArt = (function () {
   function mergeValue(k, local, imported) {
     if (local === undefined) return imported;
     if (/-best$/.test(k)) return String(Math.max(Number(local), Number(imported)));
+    if (/^minen-zeit-/.test(k)) return String(Math.min(Number(local), Number(imported)));   // schnellere Zeit gewinnt
     if (TRACK.test(k)) {
       var a = JSON.parse(local), b = JSON.parse(imported);
       return JSON.stringify({ lap: Math.min(a.lap, b.lap), total: Math.min(a.total, b.total) });
@@ -5877,6 +6298,10 @@ var FigurenArt = (function () {
     var names = { "snake-best": "Snake", "2048-best": "2048", "rennen-best": "Autorennen", "quallen-best": "Quallen-Runner", "tischtennis-best": "Tischtennis (längster Ballwechsel)", "flaggen-best-leicht": "Flaggenraten leicht (von 20 Punkten)", "flaggen-best-alle": "Flaggenraten alle Länder (von 20)", "flaggen-best-europa": "Flaggenraten Europa (von 20)", "flaggen-best-asien": "Flaggenraten Asien (von 20)", "flaggen-best-afrika": "Flaggenraten Afrika (von 20)", "flaggen-best-amerika": "Flaggenraten Amerika (von 20)", "flaggen-best-ozeanien": "Flaggenraten Ozeanien (von 20)" };
     Object.keys(names).forEach(function (k) {
       if (data[k] !== undefined) lines.push(names[k] + ": Rekord " + fmtNum(Number(data[k])));
+    });
+    var mn = { "minen-zeit-leicht": "leicht", "minen-zeit-mittel": "mittel", "minen-zeit-schwer": "schwer" };
+    Object.keys(mn).forEach(function (k) {
+      if (data[k] !== undefined) lines.push("Minesweeper " + mn[k] + ": Bestzeit " + (Number(data[k]) / 1000).toFixed(1).replace(".", ",") + " s");
     });
     var tracks = Object.keys(data).filter(function (k) { return TRACK.test(k); });
     if (tracks.length) lines.push("Rennstrecke: Bestzeiten auf " + tracks.length + (tracks.length === 1 ? " Strecke" : " Strecken"));
@@ -6535,7 +6960,7 @@ var FigurenArt = (function () {
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
   var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
-  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag";
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton";
 
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
@@ -6708,7 +7133,9 @@ var FigurenArt = (function () {
       };
     }
 
-    var online = false, net = null;            // online: gegen ein anderes Gerät mit Code
+    var online = false, net = null;
+    var matchLen = 11;                        // Spielende offline: 5, 11 oder 21 Punkte
+    try { var sl0 = Number(localStorage.getItem(LEN_KEY)); if (sl0 === 5 || sl0 === 11 || sl0 === 21) matchLen = sl0; } catch (e) {}            // online: gegen ein anderes Gerät mit Code
     var levelId = "mittel", aim = 0;            // aim: Aufschlagwinkel in Bogenmaß
     try { var sv = localStorage.getItem(LEVEL_KEY); if (LEVELS[sv]) levelId = sv; } catch (e) {}
 
@@ -6721,6 +7148,14 @@ var FigurenArt = (function () {
       newMatch();
     });
     levelGroup.mark(levelId);
+
+    var lenGroup = chipGroup("Spielende", { "5": "Bis 5 Punkte", "11": "Bis 11 Punkte", "21": "Bis 21 Punkte" }, function (id) {
+      matchLen = Number(id);
+      try { localStorage.setItem(LEN_KEY, id); } catch (e) {}
+      lenGroup.mark(String(matchLen));
+      newMatch();
+    });
+    lenGroup.mark(String(matchLen));
 
     // Ausrüstung: Holz bestimmt das Tempo, Belag den Spin
     var blade = BLADES[2], rubber = RUBBERS[4];
@@ -6783,6 +7218,20 @@ var FigurenArt = (function () {
     startBtn.type = "button";
     startBtn.textContent = "Neues Spiel";
     row.appendChild(startBtn);
+    var soundBtn = document.createElement("button");
+    soundBtn.type = "button";
+    soundBtn.className = "link";
+    soundBtn.setAttribute("aria-pressed", String(!muted));
+    soundBtn.textContent = muted ? "Ton: aus" : "Ton: an";
+    soundBtn.addEventListener("click", function () {
+      muted = !muted;
+      try { localStorage.setItem(SOUND_KEY, muted ? "aus" : "an"); } catch (e) {}
+      soundBtn.textContent = muted ? "Ton: aus" : "Ton: an";
+      soundBtn.setAttribute("aria-pressed", String(!muted));
+      if (!muted) sfx("hit", 0.5);
+      canvas.focus({ preventScroll: true });
+    });
+    row.appendChild(soundBtn);
     row.appendChild(info);
 
     var aimRow = document.createElement("div");
@@ -6816,7 +7265,7 @@ var FigurenArt = (function () {
 
     var help = document.createElement("p");
     help.className = "hint";
-    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Ausrüstung: Das Holz bestimmt das Tempo deiner Schläge, der Belag den Spin. Dein eigenes Schlägertempo und die Bewegungsrichtung beim Treffen zählen aber immer noch. Online: Eine Person erstellt eine Partie und schickt den Code, die andere gibt ihn ein. Beide sehen sich selbst unten. Wer den Ball zuletzt gespielt hat, wartet auf die Entscheidung des Gegners.";
+    help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Ausrüstung: Das Holz bestimmt das Tempo deiner Schläge, der Belag den Spin. Dein eigenes Schlägertempo und die Bewegungsrichtung beim Treffen zählen aber immer noch. Je länger ein Ballwechsel dauert, desto schneller wird der Ball. Smashes lassen den Bildschirm wackeln. Mit „Ton“ schaltest du die Geräusche ein oder aus, und bei „Spielende“ wählst du 5, 11 oder 21 Punkte (online immer 11). Online: Eine Person erstellt eine Partie und schickt den Code, die andere gibt ihn ein. Beide sehen sich selbst unten. Wer den Ball zuletzt gespielt hat, wartet auf die Entscheidung des Gegners.";
 
     var modeGroup = chipGroup("Spielmodus", { cpu: "Gegen den Computer", online: "Online mit Code" }, function (id) { setMode(id); });
     modeGroup.mark("cpu");
@@ -6879,6 +7328,7 @@ var FigurenArt = (function () {
 
     box.appendChild(modeGroup.el);
     box.appendChild(levelGroup.el);
+    box.appendChild(lenGroup.el);
     box.appendChild(gearBox);
     box.appendChild(gearInfo);
     box.appendChild(lobby);
@@ -6905,6 +7355,8 @@ var FigurenArt = (function () {
 
     function say(t) { info.textContent = t; }
     function oppName() { return online ? "Gegner" : "Computer"; }
+    function goal() { return online ? 11 : matchLen; }
+    function kmh(v) { return Math.round(v * 0.09); }
 
     function newBall(x, y, z) { return { x: x, y: y, z: z, vx: 0, vy: 0, vz: 0, sp: 0, sd: 0, rot: 0 }; }
 
@@ -6915,7 +7367,7 @@ var FigurenArt = (function () {
         ball: newBall(150, MIDY, 40),
         pl: { x: 170, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 170, oy: MIDY, cd: 0, flash: 0 },
         cpu: { x: 600, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 600, oy: MIDY, cd: 0, flash: 0, tx: 600, ty: MIDY, plan: false },
-        last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, frozen: false, pend: null, rng: null, trail: [], pop: null, cord: false, serveLeg: 0, serve2: null, preview: null, previewAt: 0
+        stats: { smash: 0, fast: 0, aces: 0 }, shake: 0, last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, frozen: false, pend: null, rng: null, trail: [], pop: null, cord: false, serveLeg: 0, serve2: null, preview: null, previewAt: 0
       };
       banner = "";
       prepareServe();
@@ -6924,7 +7376,7 @@ var FigurenArt = (function () {
     }
 
     function serverFor(points) {
-      var s = points < 20 ? (Math.floor(points / 2) % 2 === 0 ? "L" : "R") : (points % 2 === 0 ? "L" : "R");
+      var s = points < (goal() - 1) * 2 ? (Math.floor(points / 2) % 2 === 0 ? "L" : "R") : (points % 2 === 0 ? "L" : "R");
       if (online && net && !net.host) s = s === "L" ? "R" : "L";        // der Gast schlägt als Zweiter auf
       return s;
     }
@@ -6944,17 +7396,70 @@ var FigurenArt = (function () {
       S.cpu.plan = false;
       S.serveAt = performance.now() + 900;
       banner = S.server === "L" ? "Dein Aufschlag: Leertaste/Tippen wirft hoch" : "Aufschlag " + (online ? "Gegner" : "Computer");
+      var ml = goal() - 1, ph = "";
+      if (S.score.L >= ml && S.score.L > S.score.R) ph = "Matchball für dich";
+      else if (S.score.R >= ml && S.score.R > S.score.L) ph = "Matchball für " + (online ? "deinen Gegner" : "den Computer");
+      if (ph) banner = ph + ": " + banner;
       if (waiting()) banner = waitBanner();
       updateText();
     }
 
     function updateText() {
       var t = "Du " + S.score.L + " : " + S.score.R + " " + oppName();
-      if (S.over) t += S.score.L > S.score.R ? ". Du hast gewonnen" : (online ? ". Dein Gegner hat gewonnen" : ". Der Computer hat gewonnen");
+      if (S.over) {
+        t += S.score.L > S.score.R ? ". Du hast gewonnen" : (online ? ". Dein Gegner hat gewonnen" : ". Der Computer hat gewonnen");
+        t += ". Deine Smashes: " + S.stats.smash + ", Asse: " + S.stats.aces + (S.stats.fast ? ", schnellster Ball: " + kmh(S.stats.fast) + " km/h" : "");
+      }
       else if (S.rally > 1) t += ". Ballwechsel: " + S.rally;
       t += ". Rekord: längster Ballwechsel " + best + ".";
       if (online && net && net.players === 2 && !net.opp && !net.left) t += " Die Verbindung zum Gegner ist unterbrochen.";
       say(t);
+    }
+
+    // ---------- Ton ----------
+    var audio = null, muted = false, lastSfx = {};
+    try { muted = localStorage.getItem(SOUND_KEY) === "aus"; } catch (e) {}
+    function actx() {
+      if (muted) return null;
+      try {
+        if (!audio) { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; audio = new AC(); }
+        if (audio.state === "suspended") audio.resume();
+        return audio;
+      } catch (e) { return null; }
+    }
+    function tone(a, f0, f1, dur, vol, type, delay) {
+      var t0 = a.currentTime + (delay || 0), o = a.createOscillator(), g = a.createGain();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(f0, t0);
+      o.frequency.exponentialRampToValueAtTime(Math.max(30, f1), t0 + dur);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(a.destination);
+      o.start(t0); o.stop(t0 + dur + 0.03);
+    }
+    function noise(a, dur, vol, freq) {
+      var n = Math.max(1, Math.floor(a.sampleRate * dur)), buf = a.createBuffer(1, n, a.sampleRate), d = buf.getChannelData(0);
+      for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      var src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+      src.buffer = buf; f.type = "bandpass"; f.frequency.value = freq; g.gain.value = vol;
+      src.connect(f); f.connect(g); g.connect(a.destination); src.start();
+    }
+    function sfx(kind, v) {
+      var now = performance.now();
+      if (lastSfx[kind] && now - lastSfx[kind] < 45) return;
+      lastSfx[kind] = now;
+      var a = actx();
+      if (!a) return;
+      v = clamp(v === undefined ? 0.5 : v, 0, 1);
+      try {
+        if (kind === "hit") { noise(a, 0.05, 0.25 + 0.3 * v, 2600); tone(a, 900 + 500 * v, 380, 0.07, 0.12 + 0.12 * v, "triangle"); }
+        else if (kind === "smash") { noise(a, 0.09, 0.6, 1800); tone(a, 1200, 220, 0.14, 0.3, "triangle"); tone(a, 140, 60, 0.18, 0.35, "sine"); }
+        else if (kind === "table") { tone(a, 620 + 200 * v, 340, 0.05, 0.08 + 0.2 * v, "sine"); noise(a, 0.02, 0.06 + 0.1 * v, 3200); }
+        else if (kind === "net") { noise(a, 0.12, 0.2, 700); tone(a, 220, 110, 0.1, 0.1, "sine"); }
+        else if (kind === "win") { tone(a, 523, 523, 0.12, 0.18, "triangle"); tone(a, 784, 784, 0.2, 0.18, "triangle", 0.1); }
+        else if (kind === "lose") { tone(a, 330, 330, 0.14, 0.16, "triangle"); tone(a, 220, 200, 0.24, 0.16, "triangle", 0.12); }
+      } catch (e) {}
     }
 
     // ---------- Online ----------
@@ -6989,6 +7494,7 @@ var FigurenArt = (function () {
       aimRow.style.display = lob ? "none" : "";
       row.style.display = lob ? "none" : "";
       levelGroup.el.style.display = online ? "none" : "";
+      lenGroup.el.style.display = online ? "none" : "";
       gearBox.style.display = lob ? "none" : "";
       gearInfo.style.display = lob ? "none" : "";
       startBtn.style.display = online && !S.over ? "none" : "";
@@ -7208,6 +7714,7 @@ var FigurenArt = (function () {
       S.frozen = false; S.pend = null;
       S.last = "R"; S.bounced = false; S.cord = false; S.trail = []; S.preview = null;
       S.cpu.flash = 0.18;
+      sfx("hit", 0.6);
       if (isServe) {
         S.serveLeg = 1; S.expect = "R"; S.serve2 = { xt: 2 * NETX - ev.xt, yt: 2 * MIDY - ev.yt, T: ev.T };
         S.state = "rally"; S.rally = 1; banner = "";
@@ -7268,6 +7775,7 @@ var FigurenArt = (function () {
       banner = "";
       p.cd = 0.2;
       p.flash = 0.18;
+      sfx("hit", 0.4);
       var name = sol.sp > 0.2 ? "Topspin-Aufschlag" : sol.sp < -0.2 ? "Unterschnitt-Aufschlag" : Math.abs(sol.sd) > 0.2 ? "Seitenspin-Aufschlag" : "Aufschlag";
       pop(sol.q < 0.7 ? "Kantenball" : name, p.x, p.y);
       updateText();
@@ -7284,6 +7792,7 @@ var FigurenArt = (function () {
       launch(b, plan(b.x, b.y, b.z, x1, y1, 0.46, sp, sd), sp, sd);
       S.serve2 = { xt: xt2, yt: yt2, T: 0.6 };
       S.serveLeg = 1;
+      sfx("hit", 0.4);
       S.last = "R";
       S.expect = "R";
       S.bounced = false;
@@ -7376,7 +7885,8 @@ var FigurenArt = (function () {
       xt += clamp(b.sp, -1, 1) * 28 * (1 - 0.6 * clamp(-p.sx / 200, 0, 1));
       yt += clamp(b.sd, -1, 1) * 22;
       xt = clamp(xt, NETX + 30, TR + 40);
-      var T = Math.max(0.36, (0.74 - 0.24 * power - (smash ? 0.1 : 0)) / V);
+      var ramp = Math.min(0.12, S.rally * 0.007);                 // lange Ballwechsel werden schneller
+      var T = Math.max(0.34, (0.74 - 0.24 * power - (smash ? 0.1 : 0) - ramp) / V);
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("L");
       S.frozen = false; S.pend = null;
@@ -7385,7 +7895,10 @@ var FigurenArt = (function () {
       if (online) netSend({ k: "shot", x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz, sp: b.sp, sd: b.sd, seed: seed });
       p.cd = 0.2;
       p.flash = 0.18;
-      if (smash) pop("Smash!", p.x, p.y);
+      var spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+      if (spd > S.stats.fast) S.stats.fast = spd;
+      if (smash) { S.stats.smash++; S.shake = 0.9; sfx("smash"); } else sfx("hit", power);
+      if (smash) pop("Smash! " + kmh(spd) + " km/h", p.x, p.y);
       else if (q < 0.7) pop("Kantenball", p.x, p.y);
       else if (behind) pop("Zu spät", p.x, p.y);
       else if (sp > 0.45) pop("Topspin", p.x, p.y);
@@ -7399,13 +7912,14 @@ var FigurenArt = (function () {
       var q = d <= core ? 1 : 1 - 0.5 * clamp((d - core) / (REACH - core), 0, 1);
       var yt = (S.pl.y < MIDY ? MIDY + 80 : MIDY - 80) + (Math.random() - 0.5) * 70 + (Math.random() - 0.5) * 2 * lv.err + (1 - q) * 60 * (Math.random() * 2 - 1);
       var xt = TL + 30 + Math.random() * 200;
-      var T = 0.62 + Math.random() * 0.16;
+      var T = Math.max(0.4, 0.62 + Math.random() * 0.16 - Math.min(0.12, S.rally * 0.007));
       var sp = 0, sd = 0;
       if (Math.random() < lv.spin) sp = Math.random() < 0.5 ? 0.8 : -0.8;
       if (Math.random() < lv.spin * 0.7) sd = (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.4);
       if (Math.random() < lv.slip) xt = TL - 55;                // Patzer: der Ball fliegt zu weit ins Aus
       launch(b, plan(b.x, b.y, b.z, xt, yt, T, sp, sd), sp, sd);
       afterHit("R");
+      sfx("hit", 0.5);
       c.cd = 0.2;
       c.flash = 0.18;
       c.plan = false;
@@ -7436,14 +7950,16 @@ var FigurenArt = (function () {
       if (S.state !== "rally") return;
       if (forced) { S.score.L = forced.L; S.score.R = forced.R; S.points = forced.L + forced.R; }
       else { S.score[side]++; S.points++; }
+      if (side === "L" && S.server === "L" && S.rally <= 1) S.stats.aces++;
       S.state = "point";
       S.frozen = false; S.pend = null;
+      sfx(side === "L" ? "win" : "lose");
       var a = S.score.L, b2 = S.score.R;
       if (S.longest > best) {
         best = S.longest;
         try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
       }
-      if ((a >= 11 || b2 >= 11) && Math.abs(a - b2) >= 2) {
+      if ((a >= goal() || b2 >= goal()) && Math.abs(a - b2) >= 2) {
         S.over = true;
         banner = a > b2 ? "Du gewinnst " + a + " : " + b2 + "!" : (online ? "Dein Gegner gewinnt " : "Computer gewinnt ") + b2 + " : " + a + ".";
         startBtn.textContent = "Noch ein Spiel";
@@ -7573,11 +8089,13 @@ var FigurenArt = (function () {
           S.cord = true;
           b.vx *= 0.5; b.vz = Math.max(b.vz, 0) + 80; b.vy += ((S.rng ? S.rng() : Math.random()) - 0.5) * 160 * (online && S.last === "R" ? -1 : 1); b.sp *= 0.5; b.sd *= 0.5;
           pop("Netzroller!", b.x, b.y);
-        } else { fault(1); return; }
+          sfx("net");
+        } else { sfx("net"); fault(1); return; }
       }
 
       if (b.z <= 0 && b.vz < 0) {
         if (onTable(b.x, b.y)) {
+          sfx("table", clamp(-b.vz / 500, 0, 1));
           bounce(b);
           if (S.serveLeg === 1) {                              // erster Aufsprung des Aufschlags
             var own = S.last === "L" ? b.x < NETX : b.x >= NETX;
@@ -7607,6 +8125,7 @@ var FigurenArt = (function () {
       S.pl.cd -= h; S.cpu.cd -= h;
       S.pl.flash -= h; S.cpu.flash -= h;
       if (S.pop) { S.pop.t -= h; if (S.pop.t <= 0) S.pop = null; }
+      if (S.shake > 0) S.shake = Math.max(0, S.shake - h * 3);
       if (S.state === "serve" && S.server === "L") { S.ball.x = S.pl.x + PR + 10; S.ball.y = S.pl.y; S.ball.z = 34; }
       else if (S.state === "serve" && online) { S.ball.x = S.cpu.x - PR - 10; S.ball.y = S.cpu.y; S.ball.z = 34; }
       if (S.state === "rally") stepBall(h);
@@ -7807,6 +8326,9 @@ var FigurenArt = (function () {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.textBaseline = "alphabetic";
+      var shk = S.shake > 0 ? S.shake : 0;               // Bildschirmwackeln bei einem Smash
+      CAM.cx = CW / 2 + (Math.random() - 0.5) * shk * 16;
+      CAM.cy = 330 + (Math.random() - 0.5) * shk * 12;
       // Hintergrund: dunkle Halle mit Boden
       var bg = ctx.createLinearGradient(0, 0, 0, CH);
       bg.addColorStop(0, "#0a1a24"); bg.addColorStop(1, "#16384a");
