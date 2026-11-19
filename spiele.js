@@ -5893,40 +5893,6 @@ var FigurenArt = (function () {
     return lines;
   }
 
-  // ---------- Geheimcodes ----------
-  // Ein Code wird eingegeben, geprüft und schreibt direkt in den gespeicherten Stand.
-  function qiEngine() {
-    var list = window.Spiele || [];
-    for (var i = 0; i < list.length; i++) if (list[i].id === "quallenimperium" && list[i]._engine) return list[i]._engine;
-    return null;
-  }
-
-  var CODES = {
-    // Quallen-Imperium: die ersten fünf Galaxien sind besiedelt, du baust ab jetzt in der sechsten
-    GALAXIE6: function () {
-      var eng = qiEngine();
-      if (!eng) return { error: "Quallen-Imperium ist nicht geladen. Lade die Seite neu und versuche es noch einmal." };
-      var s = null;
-      try { s = JSON.parse(localStorage.getItem("quallenimperium-v1")); } catch (e) {}
-      if (!s || !Array.isArray(s.owned) || !isFinite(s.coins) || !isFinite(s.total)) s = eng.newState();
-      var target = eng.GAL_END[4];                       // fünf vollständige Galaxien
-      var gal = eng.GALAXIES[5];
-      if ((s.planets || 0) >= target) return { ok: "Du bist im Quallen-Imperium schon in der sechsten Galaxie oder weiter. Es wurde nichts verändert." };
-      s.planets = target;
-      s.last = Date.now();
-      try { localStorage.setItem("quallenimperium-v1", JSON.stringify(s)); } catch (e) { return { error: "Der Stand konnte nicht gespeichert werden." }; }
-      return { ok: "Eingelöst: Im Quallen-Imperium sind jetzt " + target + " Planeten besiedelt und die Boni der ersten fünf Galaxien aktiv. Du baust in der Galaxie „" + gal.name + "“ weiter. Öffne das Quallen-Imperium, um sie zu sehen." };
-    }
-  };
-  CODES.UNIVERSUM6 = CODES.GALAXIE6;
-
-  function redeem(text) {
-    var key = String(text || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!key) return { error: "Gib einen Code ein." };
-    if (!Object.prototype.hasOwnProperty.call(CODES, key)) return { error: "Diesen Code gibt es nicht. Prüfe die Eingabe." };
-    return CODES[key]();
-  }
-
   // ---------- Oberfläche ----------
   var CSS = ".ss-ta{min-height:3.5rem;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:0.8rem;line-height:1.3;word-break:break-all}" +
     ".ss-list{padding-left:1.2rem;margin:0.25rem 0 1rem}" +
@@ -6017,30 +5983,8 @@ var FigurenArt = (function () {
     inn.appendChild(reloadBtn);
     inn.appendChild(el("p", "msg", "Zusammenführen behält jeweils den besseren Wert (höchster Rekord, schnellste Zeit, weitester Fortschritt). Alles ersetzen überschreibt den Stand auf diesem Gerät komplett."));
 
-    // --- Code einlösen ---
-    var red = el("div", "ss-sec");
-    red.appendChild(el("p", "label", "Code einlösen"));
-    red.appendChild(el("p", "msg", "Hast du einen Spezialcode? Gib ihn hier ein."));
-    var redRow = el("div", "row");
-    var redIn = document.createElement("input");
-    redIn.type = "text";
-    redIn.maxLength = 24;
-    redIn.autocomplete = "off";
-    redIn.setAttribute("autocapitalize", "characters");
-    redIn.setAttribute("spellcheck", "false");
-    redIn.setAttribute("aria-label", "Spezialcode");
-    var redBtn = el("button", "", "Einlösen");
-    redBtn.type = "button";
-    redRow.appendChild(redIn);
-    redRow.appendChild(redBtn);
-    red.appendChild(redRow);
-    var redMsg = el("p", "msg");
-    redMsg.setAttribute("aria-live", "polite");
-    red.appendChild(redMsg);
-
     box.appendChild(out);
     box.appendChild(inn);
-    box.appendChild(red);
 
     function setMsg(target, text, isError) {
       target.textContent = text || "";
@@ -6130,16 +6074,6 @@ var FigurenArt = (function () {
     replaceBtn.addEventListener("click", function () { doImport("replace"); });
     reloadBtn.addEventListener("click", function () { window.location.reload(); });
 
-    function doRedeem() {
-      var r = redeem(redIn.value);
-      if (r.error) { setMsg(redMsg, r.error, true); return; }
-      setMsg(redMsg, r.ok);
-      redIn.value = "";
-      refreshExport();
-    }
-    redBtn.addEventListener("click", doRedeem);
-    redIn.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); doRedeem(); } });
-
     copyBtn.disabled = saveBtn.disabled = shareBtn.disabled = true;
     mergeBtn.disabled = replaceBtn.disabled = true;
     refreshExport();
@@ -6151,7 +6085,7 @@ var FigurenArt = (function () {
     id: "spielstand",
     name: "Spielstand",
     start: start,
-    _engine: { redeem: redeem, isKnownKey: isKnownKey, validValue: validValue, makeCode: makeCode, parseCode: parseCode, mergeValue: mergeValue, applyImport: applyImport, readLocal: readLocal, summarize: summarize }
+    _engine: { isKnownKey: isKnownKey, validValue: validValue, makeCode: makeCode, parseCode: parseCode, mergeValue: mergeValue, applyImport: applyImport, readLocal: readLocal, summarize: summarize }
   });
 })();
 
