@@ -1,6 +1,9 @@
 // Alle Spiele (window.Spiele) und Werkzeuge (window.Werkzeuge: Uhr, Spielstand) in einer Datei.
 // Wird nur nach dem Login ausgeliefert.
 
+/* © 2026 BlaueQualle. Alle Rechte vorbehalten.
+Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis. */
+
 // ===== 2048.js =====
 // Spiel: 2048
 (function () {
