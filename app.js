@@ -667,6 +667,14 @@
       } catch (e) {}
       return n ? "Bestzeiten auf " + n + (n === 1 ? " Strecke" : " Strecken") : "Noch keine Bestzeit";
     } },
+    { id: "flaggenraten", icon: "🚩", name: "Flaggenraten", desc: "Länder an ihrer Flagge erkennen", stat: function () {
+      var best = 0;
+      ["leicht", "alle", "europa", "asien", "afrika", "amerika", "ozeanien"].forEach(function (k) {
+        best = Math.max(best, Number(store.get("flaggen-best-" + k)) || 0);
+      });
+      return best > 0 ? "Rekord " + fmtInt(best) + " von 20" : "Noch kein Rekord";
+    } },
+    { id: "solitaer", icon: "🃏", name: "Solitär", desc: "Karten sortieren und ablegen", stat: bestStat("solitaer-best") },
     { id: "quallenrunner", icon: "🏃", name: "Quallen-Runner", desc: "Springen und ducken unter Wasser", stat: bestStat("quallen-best") },
     { id: "schach", icon: "♟️", name: "Schach", desc: "Gegen den Computer, zu zweit oder online mit Code", stat: function () {
       var v = Number(store.get("schach-elo"));

@@ -1,6 +1,6 @@
+# © 2026 BlaueQualle. Alle Rechte vorbehalten.
+# Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis.
 """Fragenraum: passwortgeschützte Website mit Gemini-Fragen, Spielen und Uhr."""
-
-# © 2026 BlaueQualle. Alle Rechte vorbehalten. Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis.
 
 import hashlib
 import hmac
@@ -118,6 +118,13 @@ def take_daily_slot():
         return True
 
 
+def give_back_daily_slot():
+    """Fehlgeschlagene Anfragen sollen das Tageslimit nicht verbrauchen."""
+    with _day_lock:
+        if _day["key"] == datetime.now(timezone.utc).date() and _day["count"] > 0:
+            _day["count"] -= 1
+
+
 # --- Hilfsfunktionen ---------------------------------------------------------------
 def safe_equal(a, b):
     ha = hashlib.sha256(str(a).encode("utf-8")).digest()
@@ -209,12 +216,15 @@ def ask():
         )
     except requests.RequestException as exc:
         app.logger.error("Anfrage an Gemini fehlgeschlagen: %s", exc)
+        give_back_daily_slot()
         return api_error("Gemini ist nicht erreichbar.", 502)
 
     if r.status_code == 429:
+        give_back_daily_slot()
         return api_error("Gemini-Limit erreicht.", 429)
     if not r.ok:
         app.logger.error("Gemini-Fehler %s: %s", r.status_code, r.text[:500])
+        give_back_daily_slot()
         return api_error("Gemini hat einen Fehler gemeldet.", 502)
 
     try:
@@ -223,6 +233,7 @@ def ask():
     except (ValueError, KeyError, IndexError, TypeError):
         answer = ""
     if not answer:
+        give_back_daily_slot()
         return api_error("Keine Antwort erhalten (evtl. vom Sicherheitsfilter blockiert).", 502)
     return jsonify({"answer": answer})
 
@@ -251,6 +262,10 @@ def chess_db():
 def chess_init():
     con = chess_db()
     try:
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass
         con.execute(
             "CREATE TABLE IF NOT EXISTS rooms (code TEXT PRIMARY KEY, updated REAL, wtok TEXT, btok TEXT, "
             "wseen REAL, bseen REAL, moves TEXT, status TEXT, reason TEXT, offer TEXT)"
@@ -332,7 +347,8 @@ def chess_create():
         con.execute(
             "INSERT INTO rooms (code, updated, wtok, btok, wseen, bseen, moves, status, reason, offer) "
             "VALUES (?, ?, ?, ?, ?, ?, '[]', 'wait', NULL, NULL)",
-            (code, now, token if color == "w" else None, token if color == "b" else None, now, now),
+            (code, now, token if color == "w" else None, token if color == "b" else None,
+             now if color == "w" else 0, now if color == "b" else 0),
         )
         con.execute("COMMIT")
     finally:

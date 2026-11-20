@@ -6097,6 +6097,7 @@ var FigurenArt = (function () {
   var BEST_KEYS = ["snake-best", "2048-best", "rennen-best", "quallen-best", "tischtennis-best", "flaggen-best-leicht", "flaggen-best-alle", "flaggen-best-europa", "flaggen-best-asien", "flaggen-best-afrika", "flaggen-best-amerika", "flaggen-best-ozeanien", "solitaer-best"];
   var MINEN_KEYS = ["minen-zeit-leicht", "minen-zeit-mittel", "minen-zeit-schwer"];
   var TRACK = /^rennstrecke:\d{1,6}$/;
+  var BEST_RE = /-best(-[a-z]+)?$/;   // auch flaggen-best-leicht usw.
   var MAX_VALUE = 200000;
 
   // ---------- Regeln: was gehört zum Spielstand, was ist gültig ----------
@@ -6107,7 +6108,7 @@ var FigurenArt = (function () {
 
   function validValue(k, v) {
     if (typeof v !== "string" || v.length > MAX_VALUE) return false;
-    if (/-best$/.test(k) || /^minen-zeit-/.test(k)) return /^\d{1,12}$/.test(v);
+    if (BEST_RE.test(k) || /^minen-zeit-/.test(k)) return /^\d{1,12}$/.test(v);
     if (k === "helligkeit") return v === "auto" || v === "light" || v === "dark";
     if (k === "farben") {
       var a = parseJson(v);
@@ -6280,7 +6281,7 @@ var FigurenArt = (function () {
   // ---------- Zusammenführen: jeweils den besseren Stand behalten ----------
   function mergeValue(k, local, imported) {
     if (local === undefined) return imported;
-    if (/-best$/.test(k)) return String(Math.max(Number(local), Number(imported)));
+    if (BEST_RE.test(k)) return String(Math.max(Number(local), Number(imported)));
     if (/^minen-zeit-/.test(k)) return String(Math.min(Number(local), Number(imported)));   // schnellere Zeit gewinnt
     if (TRACK.test(k)) {
       var a = JSON.parse(local), b = JSON.parse(imported);
