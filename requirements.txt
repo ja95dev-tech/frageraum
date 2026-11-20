@@ -1,3 +1,6 @@
+/* © 2026 BlaueQualle. Alle Rechte vorbehalten.
+Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis. */
+
 Flask>=3.0,<4
 python-dotenv>=1.0,<2
 requests>=2.31,<3
