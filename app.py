@@ -1,8 +1,6 @@
-/* © 2026 BlaueQualle. Alle Rechte vorbehalten.
-Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis. */
-
-
 """Fragenraum: passwortgeschützte Website mit Gemini-Fragen, Spielen und Uhr."""
+
+# © 2026 BlaueQualle. Alle Rechte vorbehalten. Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis.
 
 import hashlib
 import hmac
