@@ -6974,7 +6974,6 @@ var FigurenArt = (function () {
   var R = 7;                                  // Ballradius
   var G = 950;                                // Schwerkraft (in z-Richtung)
   var DRAG = 0.35;                            // Luftwiderstand pro Sekunde
-  var BOUNCE_FRICTION = 0.8;                  // beim Aufsprung auf der Platte geht Tempo verloren
   var MAGNUS = 330;                           // Seitenkraft durch Seitenspin
   var DIP = 260;                              // zusätzliche Schwerkraft durch Topspin (bei Unterschnitt weniger)
   var KICK = 150;                             // Seitenschub beim Aufsprung durch Seitenspin
@@ -6988,7 +6987,7 @@ var FigurenArt = (function () {
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
   var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
-  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton";
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte";
 
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
@@ -6999,25 +6998,59 @@ var FigurenArt = (function () {
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
   // ---------- Physik (wird vom Spiel, der Flugbahn-Vorschau und dem Computer gemeinsam benutzt) ----------
+  // Platten: Federung (rest = Rücksprung), Haftung (mu = Reibung für Spin), Farbe, Glanz
+  var TABLES = [
+    { id: "standard", env: "halle", legs: "rohr", name: "Standard (Farbe der Seite)", col: null, gloss: 1, rest: 0.90, mu: 0.22 },
+    { id: "gruen", env: "turnier", legs: "klapp", name: "Turnierplatte 25 mm, Grün", col: "#1d6b3a", gloss: 1, rest: 0.91, mu: 0.21 },
+    { id: "hochglanz", env: "arena", legs: "chrom", name: "Hochglanz Blau (schnell, wenig Grip)", col: "#0d2f78", gloss: 1.8, rest: 0.95, mu: 0.15 },
+    { id: "schule", env: "turnhalle", legs: "holz", name: "Schulplatte 16 mm (weich, viel Grip)", col: "#51705a", gloss: 0.2, rest: 0.83, mu: 0.30 },
+    { id: "beton", env: "draussen", legs: "block", name: "Outdoor Beton (flach, rau)", col: "#8e8e86", gloss: 0, rest: 0.79, mu: 0.36 },
+    { id: "glas", env: "neon", legs: "glas", name: "Glasplatte (rutschig)", col: "#7fb7c9", gloss: 2.4, rest: 0.94, mu: 0.07 }
+  ];
+  var TBL = TABLES[0];
+  var MIDX = (TL + TR) / 2;
+  var SPINV = 640;                                // Rand-Geschwindigkeit des Balls pro Spin-Einheit (px/s)
+  var KHOLLOW = 2 / 3;                            // Trägheit der Hohlkugel (Tischtennisball)
+  var V0 = 430;                                   // Bezugs-Tempo für Luftwiderstand und Magnus
+
   function advance(b, dt) {
-    var dm = Math.exp(-DRAG * dt);
+    var vh = Math.sqrt(b.vx * b.vx + b.vy * b.vy + b.vz * b.vz);
+    var rel = clamp(vh / V0, 0.25, 2.4);
+    var dm = Math.exp(-DRAG * (0.45 + 0.55 * rel) * dt);   // Luftwiderstand wächst mit dem Tempo
     b.vx *= dm; b.vy *= dm;
-    b.vy += b.sd * MAGNUS * dt;                  // Seitenspin lenkt den Ball ab
-    b.vz -= (G + b.sp * DIP) * dt;               // Topspin zieht nach unten, Unterschnitt trägt
+    b.vy += b.sd * MAGNUS * rel * dt;            // Magnus: Seitenspin lenkt den Ball ab, stärker bei schnellem Ball
+    b.vz -= (G + b.sp * DIP * rel) * dt;         // Topspin zieht nach unten, Unterschnitt trägt
+    // halbimplizit: erst Geschwindigkeit, dann Ort
     b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
-    var sm = Math.exp(-0.25 * dt);
+    var sm = Math.exp(-0.18 * dt);
     b.sp *= sm; b.sd *= sm;
   }
 
+  // Aufsprung mit Coulomb-Reibung: Die Platte bremst oder beschleunigt die Bahn und ändert dabei den Drall.
   function bounce(b) {
     b.z = 0;
-    var hard = clamp(-b.vz / 500, 0, 1);            // harte Aufsprünge verlieren mehr Höhe
-    b.vz = -b.vz * clamp(0.9 - 0.06 * hard - 0.1 * b.sp, 0.68, 0.98);
-    var f = BOUNCE_FRICTION * (1 + 0.35 * b.sp);   // Topspin schiebt nach vorn, Unterschnitt bremst
-    b.vx *= f; b.vy *= f;
-    if (b.sp > 0.3) b.vz *= 1 - 0.12 * b.sp;      // Topspin springt flacher
-    b.vy += b.sd * KICK;                           // Seitenspin schiebt zur Seite
-    b.sp *= 0.6; b.sd *= 0.6;
+    var vin = -b.vz;
+    var hard = clamp(vin / 500, 0, 1);
+    var e = clamp(TBL.rest - 0.05 * hard, 0.6, 0.98);
+    b.vz = vin * e;
+    var vt = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+    var ux = vt > 1e-6 ? b.vx / vt : 1, uy = vt > 1e-6 ? b.vy / vt : 0;
+    var slip = vt - SPINV * b.sp;                           // Geschwindigkeit des Berührpunkts gegenüber der Platte
+    var J = TBL.mu * (1 + e) * vin;                         // größter Reibstoß
+    var stick = Math.abs(slip) / (1 + KHOLLOW);
+    var dv, dw;                                             // Änderung von Bahn-Tempo und Rand-Drall
+    if (J >= stick * KHOLLOW) {                             // haftet: Berührpunkt kommt zur Ruhe
+      dv = -slip * KHOLLOW / (1 + KHOLLOW); dw = slip / (1 + KHOLLOW);
+    } else {                                                // rutscht
+      var sg = slip > 0 ? 1 : -1;
+      dv = -sg * J; dw = sg * J / KHOLLOW;
+    }
+    var nvt = Math.max(0, vt + dv);
+    b.vx = ux * nvt; b.vy = uy * nvt;
+    b.sp = clamp(b.sp + dw / SPINV, -1.6, 1.6);
+    // Seitenspin: schiebt den Ball je nach Haftung zur Seite
+    b.vy += b.sd * KICK * (TBL.mu / 0.22);
+    b.sd *= 1 - clamp(TBL.mu * 2.2, 0.1, 0.8);
   }
 
   // Fliegt den Ball bis zum ersten Aufsprung. Gibt den Landepunkt und die Höhe über dem Netz zurück.
@@ -7216,6 +7249,13 @@ var FigurenArt = (function () {
       wrap.appendChild(sel);
       return wrap;
     }
+    var tableSel = TABLES[0];
+    try { var st0 = localStorage.getItem(TABLE_KEY); TABLES.forEach(function (x) { if (x.id === st0) tableSel = x; }); } catch (e) {}
+    var tableSelectEl = null;
+    function applyTable() {
+      TBL = online ? TABLES[0] : tableSel;
+      if (tableSelectEl) { tableSelectEl.disabled = online; tableSelectEl.value = TBL.id; }
+    }
     var gearInfo = document.createElement("p");
     gearInfo.className = "msg";
     gearInfo.setAttribute("aria-live", "polite");
@@ -7225,7 +7265,8 @@ var FigurenArt = (function () {
     function showGear() {
       gearInfo.textContent = "Holz " + blade.name + ": Tempo " + rate(blade.speed, 0.82, 1.17) + ", Kontrolle " + rate(blade.ctl, 0.8, 1.27) +
         ". Belag " + rubber.name + ": Spin " + rate(rubber.spin, 0.68, 1.27) + ", Tempo " + rate(rubber.speed, 0.86, 1.09) + ", Kontrolle " + rate(rubber.ctl, 0.88, 1.32) +
-        ". Wie hart und mit wie viel Spin der Ball fliegt, hängt weiter von deinem Schlägertempo und der Bewegungsrichtung beim Treffen ab.";
+        ". Wie hart und mit wie viel Spin der Ball fliegt, hängt weiter von deinem Schlägertempo und der Bewegungsrichtung beim Treffen ab." +
+        (online ? " Online wird immer auf der Standardplatte gespielt." : " Platte: " + TBL.name + (TBL.mu < 0.12 ? ", der Drall greift kaum" : TBL.mu > 0.28 ? ", viel Grip, Spin wirkt stark" : "") + (TBL.rest > 0.93 ? ", der Ball springt hoch" : TBL.rest < 0.82 ? ", der Ball springt flach" : "") + ".");
     }
     gearBox.appendChild(gearSelect("tt-blade", "Holz", BLADES, blade, function (x) {
       blade = x; setGear(blade, rubber); showGear();
@@ -7235,6 +7276,14 @@ var FigurenArt = (function () {
       rubber = x; setGear(blade, rubber); showGear();
       try { localStorage.setItem(RUBBER_KEY, x.id); } catch (e) {}
     }));
+    var tableLabel = gearSelect("tt-table", "Platte", TABLES, tableSel, function (x) {
+      tableSel = x; applyTable(); showGear();
+      try { localStorage.setItem(TABLE_KEY, x.id); } catch (e) {}
+      if (S && S.state) S.previewAt = 0;
+    });
+    tableSelectEl = tableLabel.querySelector("select");
+    gearBox.appendChild(tableLabel);
+    applyTable();
     showGear();
 
     var info = document.createElement("p");
@@ -7537,6 +7586,7 @@ var FigurenArt = (function () {
       if (m === (online ? "online" : "cpu")) return;
       if (net) leaveNet();
       online = m === "online";
+      applyTable(); showGear();
       modeGroup.mark(m);
       lobbyMsg.textContent = "";
       lobbyMsg.className = "msg";
@@ -8124,7 +8174,14 @@ var FigurenArt = (function () {
       if (b.z <= 0 && b.vz < 0) {
         if (onTable(b.x, b.y)) {
           sfx("table", clamp(-b.vz / 500, 0, 1));
+          var edge = Math.min(b.y - TT, TB - b.y, b.x - TL, TR - b.x);
           bounce(b);
+          if (edge < R * 0.55 && S.serveLeg !== 1) {          // Kantenball: unberechenbar abgelenkt
+            var er = S.rng ? S.rng() : Math.random();
+            b.vz *= 0.5 + er; b.vx *= 0.75;
+            b.vy += (er - 0.5) * 220 * (online && S.last === "R" ? -1 : 1);
+            pop("Plattenkante!", b.x, b.y);
+          }
           if (S.serveLeg === 1) {                              // erster Aufsprung des Aufschlags
             var own = S.last === "L" ? b.x < NETX : b.x >= NETX;
             if (!own) { fault(3); return; }
@@ -8314,6 +8371,104 @@ var FigurenArt = (function () {
       if (active) poly3(circle3(p.x, p.y, 0, p === S.pl ? PREACH : REACH, 40), "rgba(255,210,63,0.16)", "#ffd23f", 2.5);
     }
 
+    // ---------- Umgebung und Gestell je nach Platte ----------
+    function floorGrid(fill, edge, grid, step) {
+      poly3([[-260, -420, FLOORZ], [1020, -420, FLOORZ], [1020, 1000, FLOORZ], [-260, 1000, FLOORZ]], fill, edge, 1.5);
+      if (!grid) return;
+      for (var i = -260; i <= 1020; i += step) line3([i, -420, FLOORZ], [i, 1000, FLOORZ], grid, 1);
+      for (i = -420; i <= 1000; i += step) line3([-260, i, FLOORZ], [1020, i, FLOORZ], grid, 1);
+    }
+    function backdrop(c0, c1) {
+      var bg = ctx.createLinearGradient(0, 0, 0, CH);
+      bg.addColorStop(0, c0); bg.addColorStop(1, c1);
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, CW, CH);
+    }
+    function wall(x0, y0, x1, y1, h, fill, stroke) {
+      poly3([[x0, y0, FLOORZ], [x1, y1, FLOORZ], [x1, y1, FLOORZ + h], [x0, y0, FLOORZ + h]], fill, stroke, 1.5);
+    }
+    function drawEnv(kind, tcol) {
+      var i, p;
+      if (kind === "turnier") {                    // Turnierhalle: grüner Sportboden, blaue Banden
+        backdrop("#0a1626", "#12304a");
+        floorGrid("#1c5a43", "rgba(255,255,255,0.25)", null, 100);
+        poly3([[-40, -40, FLOORZ], [800, -40, FLOORZ], [800, 620, FLOORZ], [-40, 620, FLOORZ]], null, "rgba(255,255,255,0.7)", 2);
+        wall(-40, -40, 800, -40, 46, "#1f4fa8", "#fff"); wall(800, -40, 800, 620, 46, "#1b4592", "#fff"); wall(-40, 620, 800, 620, 46, "#1f4fa8", "#fff");
+        for (i = 40; i < 800; i += 120) { line3([i, -40, FLOORZ], [i, -40, FLOORZ + 46], "rgba(255,255,255,0.5)", 2); line3([i, 620, FLOORZ], [i, 620, FLOORZ + 46], "rgba(255,255,255,0.5)", 2); }
+        for (i = 0; i < 620; i += 140) line3([800, i, FLOORZ], [800, i, FLOORZ + 46], "rgba(255,255,255,0.5)", 2);
+      } else if (kind === "arena") {              // Arena: schwarzer Glanzboden, Scheinwerferkegel
+        backdrop("#04060d", "#0a1230");
+        floorGrid("#070b18", "rgba(120,160,255,0.35)", "rgba(120,160,255,0.08)", 100);
+        p = proj(MIDX, MIDY, FLOORZ);
+        if (p) {
+          var gr = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, 330 * p.k + 140);
+          gr.addColorStop(0, "rgba(160,190,255,0.5)"); gr.addColorStop(1, "rgba(160,190,255,0)");
+          ctx.fillStyle = gr; ctx.fillRect(0, 0, CW, CH);
+        }
+        for (i = 0; i < 6; i++) { var sx = 60 + i * 150; ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(sx, 22 + (i % 2) * 8, 3, 0, 6.3); ctx.fill(); }
+      } else if (kind === "turnhalle") {          // Turnhalle: Parkett, Wand mit Sprossen
+        backdrop("#cdbd94", "#7a5a34");
+        floorGrid("#b98b52", "rgba(60,30,0,0.5)", null, 100);
+        for (i = -420; i <= 1000; i += 40) line3([-260, i, FLOORZ], [1020, i, FLOORZ], "rgba(70,40,10,0.28)", 1);
+        for (i = -260; i <= 1020; i += 160) line3([i, -420, FLOORZ], [i, 1000, FLOORZ], "rgba(70,40,10,0.15)", 1);
+        wall(1000, -420, 1000, 1000, 380, "#d9cba0", "rgba(0,0,0,0.3)");
+        for (i = -400; i < 1000; i += 40) line3([1000, i, FLOORZ], [1000, i, FLOORZ + 380], "rgba(110,80,40,0.55)", 3);
+        for (i = 60; i < 380; i += 60) line3([1000, -420, FLOORZ + i], [1000, 1000, FLOORZ + i], "rgba(110,80,40,0.5)", 2);
+        poly3([[-40, -40, FLOORZ], [800, -40, FLOORZ], [800, 620, FLOORZ], [-40, 620, FLOORZ]], null, "rgba(255,255,255,0.65)", 2);
+      } else if (kind === "draussen") {           // Draußen: Himmel, Beton, Wiese
+        backdrop("#6fa8d3", "#d7ebf5");
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        [[150, 60, 60, 18], [420, 40, 80, 20], [680, 80, 55, 16]].forEach(function (c) { ctx.beginPath(); ctx.ellipse(c[0], c[1], c[2], c[3], 0, 0, 6.3); ctx.fill(); ctx.beginPath(); ctx.ellipse(c[0] + c[2] * 0.5, c[1] - 8, c[2] * 0.6, c[3] * 0.9, 0, 0, 6.3); ctx.fill(); });
+        poly3([[-260, -420, FLOORZ], [1020, -420, FLOORZ], [1020, 1000, FLOORZ], [-260, 1000, FLOORZ]], "#4f8f3d");
+        poly3([[-100, -120, FLOORZ], [900, -120, FLOORZ], [900, 700, FLOORZ], [-100, 700, FLOORZ]], "#8d8d86", "rgba(0,0,0,0.25)", 2);
+        [[0, 80, 160, 120], [300, 560, 420, 520], [600, 20, 700, 140], [500, 380, 560, 470], [80, 520, 190, 600]].forEach(function (c) { line3([c[0], c[1], FLOORZ], [c[2], c[3], FLOORZ], "rgba(40,40,40,0.35)", 1.5); });
+        for (i = -100; i <= 900; i += 200) line3([i, -120, FLOORZ], [i, 700, FLOORZ], "rgba(0,0,0,0.12)", 1);
+        wall(900, -120, 900, 700, 70, "#7b6a55", "rgba(0,0,0,0.3)");     // Mauer hinten
+        for (i = -100; i < 700; i += 60) line3([900, i, FLOORZ], [900, i, FLOORZ + 70], "rgba(0,0,0,0.2)", 1);
+      } else if (kind === "neon") {               // Neon: Dunkel, leuchtendes Raster
+        backdrop("#12062a", "#3a1066");
+        floorGrid("#0b0518", "#00e5ff", "rgba(255,0,200,0.35)", 100);
+        poly3([[-40, -40, FLOORZ], [800, -40, FLOORZ], [800, 620, FLOORZ], [-40, 620, FLOORZ]], null, "#00e5ff", 3);
+      } else {                                    // Halle (Standard)
+        backdrop("#0a1a24", "#16384a");
+        floorGrid("rgba(255,255,255,0.05)", "rgba(255,255,255,0.12)", "rgba(255,255,255,0.06)", 100);
+      }
+    }
+    function drawLegs(kind) {
+      var ends = [TL + 28, TR - 28], ys = [TT + 14, TB - 14], i, j, k0;
+      var w = function (z) { var q = proj(ends[0], ys[0], z); return q ? q.k : 1; };
+      if (kind === "block") {                      // Betonsockel
+        ends.forEach(function (ex) {
+          var x0 = ex - 22, x1 = ex + 22, y0 = TT + 24, y1 = TB - 24;
+          poly3([[x0, y0, FLOORZ], [x1, y0, FLOORZ], [x1, y1, FLOORZ], [x0, y1, FLOORZ]], "rgba(0,0,0,0.28)");
+          poly3([[x0, y0, FLOORZ], [x0, y1, FLOORZ], [x0, y1, -14], [x0, y0, -14]], "#6b6b66", "rgba(0,0,0,0.4)", 1);
+          poly3([[x0, y0, FLOORZ], [x1, y0, FLOORZ], [x1, y0, -14], [x0, y0, -14]], "#5d5d58", "rgba(0,0,0,0.4)", 1);
+          poly3([[x0, y1, FLOORZ], [x1, y1, FLOORZ], [x1, y1, -14], [x0, y1, -14]], "#7a7a74", "rgba(0,0,0,0.4)", 1);
+        });
+        return;
+      }
+      poly3([[TL + 10, TT + 10, FLOORZ], [TR + 14, TT + 10, FLOORZ], [TR + 14, TB + 14, FLOORZ], [TL + 10, TB + 14, FLOORZ]], "rgba(0,0,0,0.28)");
+      var col = { rohr: "#20262b", klapp: "#2c3640", chrom: "#c9d1d8", holz: "#8b5a2b", glas: "rgba(150,230,255,0.5)" }[kind] || "#20262b";
+      var fat = { rohr: 7, klapp: 8, chrom: 6, holz: 13, glas: 10 }[kind] || 7;
+      ends.forEach(function (ex) {
+        ys.forEach(function (ly) {
+          k0 = proj(ex, ly, -10);
+          if (k0) line3([ex, ly, -10], [ex, ly, FLOORZ], col, Math.max(3, fat * k0.k));
+        });
+        if (kind === "chrom") {                    // X-Verstrebung
+          line3([ex, ys[0], -20], [ex, ys[1], FLOORZ + 10], "#9aa6b0", 3);
+          line3([ex, ys[1], -20], [ex, ys[0], FLOORZ + 10], "#9aa6b0", 3);
+        } else if (kind === "klapp") {             // Querstange und Rollen
+          line3([ex, ys[0], FLOORZ + 40], [ex, ys[1], FLOORZ + 40], "#1b2229", 5);
+          ys.forEach(function (ly) { var q = proj(ex, ly, FLOORZ + 4); if (q) { ctx.fillStyle = "#101418"; ctx.beginPath(); ctx.arc(q.x, q.y, Math.max(3, 8 * q.k), 0, 6.3); ctx.fill(); } });
+        } else if (kind === "holz") {              // Holzstrebe
+          line3([ex, ys[0], FLOORZ + 55], [ex, ys[1], FLOORZ + 55], "#6e4520", 7);
+        } else if (kind === "glas") {              // Leuchtfuß
+          ys.forEach(function (ly) { var q = proj(ex, ly, FLOORZ); if (q) { ctx.fillStyle = "rgba(0,229,255,0.55)"; ctx.beginPath(); ctx.ellipse(q.x, q.y, 14 * q.k + 4, 6 * q.k + 2, 0, 0, 6.3); ctx.fill(); } });
+        }
+      });
+    }
+
     function drawNet3() {
       var y0 = TT - NETEXT, y1 = TB + NETEXT, i;
       poly3([[NETX, y0, 0], [NETX, y1, 0], [NETX, y1, NETH], [NETX, y0, NETH]], "rgba(235,240,245,0.28)");
@@ -8357,26 +8512,15 @@ var FigurenArt = (function () {
       var shk = S.shake > 0 ? S.shake : 0;               // Bildschirmwackeln bei einem Smash
       CAM.cx = CW / 2 + (Math.random() - 0.5) * shk * 16;
       CAM.cy = 330 + (Math.random() - 0.5) * shk * 12;
-      // Hintergrund: dunkle Halle mit Boden
-      var bg = ctx.createLinearGradient(0, 0, 0, CH);
-      bg.addColorStop(0, "#0a1a24"); bg.addColorStop(1, "#16384a");
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, CW, CH);
-      var mat = [[-260, -420, FLOORZ], [1020, -420, FLOORZ], [1020, 1000, FLOORZ], [-260, 1000, FLOORZ]];
-      poly3(mat, "rgba(255,255,255,0.05)", "rgba(255,255,255,0.12)", 1.5);
-      for (i = -260; i <= 1020; i += 100) line3([i, -420, FLOORZ], [i, 1000, FLOORZ], "rgba(255,255,255,0.06)", 1);
-      for (i = -420; i <= 1000; i += 100) line3([-260, i, FLOORZ], [1020, i, FLOORZ], "rgba(255,255,255,0.06)", 1);
-      // Beine und Schatten der Platte
-      poly3([[TL + 10, TT + 10, FLOORZ], [TR + 14, TT + 10, FLOORZ], [TR + 14, TB + 14, FLOORZ], [TL + 10, TB + 14, FLOORZ]], "rgba(0,0,0,0.28)");
-      [[TL + 28, TT + 14], [TL + 28, TB - 14], [TR - 28, TT + 14], [TR - 28, TB - 14]].forEach(function (l) {
-        var k0 = proj(l[0], l[1], -10), k1 = proj(l[0], l[1], FLOORZ);
-        if (k0 && k1) line3([l[0], l[1], -10], [l[0], l[1], FLOORZ], "#20262b", Math.max(3, 7 * k0.k));
-      });
+      var tcol = TBL.col || accent;
+      drawEnv(TBL.env, tcol);
+      drawLegs(TBL.legs);
       // Platte
-      poly3([[TL, TT, -14], [TL, TB, -14], [TL, TB, 0], [TL, TT, 0]], "color-mix(in srgb, " + accent + " 55%, #000)");
-      poly3([[TL, TT, 0], [TR, TT, 0], [TR, TB, 0], [TL, TB, 0]], accent);
+      poly3([[TL, TT, -14], [TL, TB, -14], [TL, TB, 0], [TL, TT, 0]], "color-mix(in srgb, " + tcol + " 55%, #000)");
+      poly3([[TL, TT, 0], [TR, TT, 0], [TR, TB, 0], [TL, TB, 0]], tcol);
       var sheen = ctx.createLinearGradient(0, proj(TR, MIDY, 0) ? proj(TR, MIDY, 0).y : 0, 0, proj(TL, MIDY, 0) ? proj(TL, MIDY, 0).y : CH);
-      sheen.addColorStop(0, "rgba(0,0,0,0.22)"); sheen.addColorStop(0.6, "rgba(255,255,255,0)"); sheen.addColorStop(1, "rgba(255,255,255,0.14)");
+      var gl = TBL.gloss;
+      sheen.addColorStop(0, "rgba(0,0,0," + Math.min(0.5, 0.22 * gl).toFixed(2) + ")"); sheen.addColorStop(0.6, "rgba(255,255,255,0)"); sheen.addColorStop(1, "rgba(255,255,255," + Math.min(0.5, 0.14 * gl).toFixed(2) + ")");
       poly3([[TL, TT, 0], [TR, TT, 0], [TR, TB, 0], [TL, TB, 0]], sheen);
       var lw = proj(TL, MIDY, 0) ? Math.max(1.5, 2.4 * proj(TL, MIDY, 0).k) : 2;
       poly3([[TL + 2, TT + 2, 0], [TR - 2, TT + 2, 0], [TR - 2, TB - 2, 0], [TL + 2, TB - 2, 0]], null, "rgba(255,255,255,0.92)", lw);
