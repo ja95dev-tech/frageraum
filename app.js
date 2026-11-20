@@ -1,7 +1,4 @@
-/* © 2026 BlaueQualle. Alle Rechte vorbehalten.
-Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis. */
-
-
+/* © 2026 BlaueQualle. Alle Rechte vorbehalten. Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis. */
 
 // DEMO_MODUS = true: Die Seite läuft ohne Server (Passwort: demo), nur zum Ansehen des Designs.
   var DEMO_MODUS = false;
