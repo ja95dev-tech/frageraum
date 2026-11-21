@@ -6987,7 +6987,7 @@ var FigurenArt = (function () {
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
   var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
-  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte";
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte", BALL_KEY = "tischtennis-ball";
 
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
@@ -7016,10 +7016,10 @@ var FigurenArt = (function () {
   function advance(b, dt) {
     var vh = Math.sqrt(b.vx * b.vx + b.vy * b.vy + b.vz * b.vz);
     var rel = clamp(vh / V0, 0.25, 2.4);
-    var dm = Math.exp(-DRAG * (0.45 + 0.55 * rel) * dt);   // Luftwiderstand wächst mit dem Tempo
+    var dm = Math.exp(-DRAG * BALL.drag * (0.45 + 0.55 * rel) * dt);   // Luftwiderstand wächst mit dem Tempo
     b.vx *= dm; b.vy *= dm;
-    b.vy += b.sd * MAGNUS * rel * dt;            // Magnus: Seitenspin lenkt den Ball ab, stärker bei schnellem Ball
-    b.vz -= (G + b.sp * DIP * rel) * dt;         // Topspin zieht nach unten, Unterschnitt trägt
+    b.vy += b.sd * MAGNUS * BALL.mag * rel * dt;            // Magnus: Seitenspin lenkt den Ball ab, stärker bei schnellem Ball
+    b.vz -= (G + b.sp * DIP * BALL.mag * rel) * dt;         // Topspin zieht nach unten, Unterschnitt trägt
     // halbimplizit: erst Geschwindigkeit, dann Ort
     b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
     var sm = Math.exp(-0.18 * dt);
@@ -7031,12 +7031,12 @@ var FigurenArt = (function () {
     b.z = 0;
     var vin = -b.vz;
     var hard = clamp(vin / 500, 0, 1);
-    var e = clamp(TBL.rest - 0.05 * hard, 0.6, 0.98);
+    var e = clamp(TBL.rest * BALL.rest - 0.05 * hard, 0.6, 0.98);
     b.vz = vin * e;
     var vt = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
     var ux = vt > 1e-6 ? b.vx / vt : 1, uy = vt > 1e-6 ? b.vy / vt : 0;
     var slip = vt - SPINV * b.sp;                           // Geschwindigkeit des Berührpunkts gegenüber der Platte
-    var J = TBL.mu * (1 + e) * vin;                         // größter Reibstoß
+    var J = TBL.mu * BALL.mu * (1 + e) * vin;                         // größter Reibstoß
     var stick = Math.abs(slip) / (1 + KHOLLOW);
     var dv, dw;                                             // Änderung von Bahn-Tempo und Rand-Drall
     if (J >= stick * KHOLLOW) {                             // haftet: Berührpunkt kommt zur Ruhe
@@ -7098,34 +7098,68 @@ var FigurenArt = (function () {
   // Werte sind Spielwerte, angelehnt an den Charakter der Butterfly-Produkte (1,00 = Grundwert).
   // speed: Tempo, ctl: Kontrolle (weniger Streuung), spin: Drall, flat: Tempo des Belags
   var BLADES = [
-    { id: "primorac", name: "Primorac", speed: 0.84, ctl: 1.25 },
-    { id: "tb-caf", name: "Timo Boll CAF", speed: 0.93, ctl: 1.12 },
-    { id: "tb-alc", name: "Timo Boll ALC", speed: 1.00, ctl: 1.00 },
-    { id: "innerforce", name: "Innerforce ALC", speed: 1.03, ctl: 1.10 },
-    { id: "viscaria", name: "Viscaria", speed: 1.08, ctl: 0.95 },
-    { id: "zjk", name: "Zhang Jike Super ZLC", speed: 1.15, ctl: 0.82 }
+    { id: "korbel", name: "Korbel", speed: 0.80, ctl: 1.30, mass: 1.02, stiff: 0.20 },
+    { id: "primorac", name: "Primorac", speed: 0.84, ctl: 1.25, mass: 0.96, stiff: 0.25 },
+    { id: "tb-spirit", name: "Timo Boll Spirit", speed: 0.90, ctl: 1.18, mass: 0.94, stiff: 0.35 },
+    { id: "tb-caf", name: "Timo Boll CAF", speed: 0.93, ctl: 1.12, mass: 0.95, stiff: 0.45 },
+    { id: "primorac-c", name: "Primorac Carbon", speed: 0.98, ctl: 1.05, mass: 0.97, stiff: 0.60 },
+    { id: "tb-zlf", name: "Timo Boll ZLF", speed: 0.99, ctl: 1.05, mass: 0.92, stiff: 0.70 },
+    { id: "tb-alc", name: "Timo Boll ALC", speed: 1.00, ctl: 1.00, mass: 1.00, stiff: 0.60 },
+    { id: "innerforce", name: "Innerforce ALC", speed: 1.03, ctl: 1.10, mass: 0.96, stiff: 0.60 },
+    { id: "garaydia", name: "Garaydia", speed: 1.05, ctl: 1.00, mass: 0.99, stiff: 0.65 },
+    { id: "fzd", name: "Fan Zhendong ALC", speed: 1.07, ctl: 0.97, mass: 1.00, stiff: 0.70 },
+    { id: "viscaria", name: "Viscaria", speed: 1.08, ctl: 0.95, mass: 1.02, stiff: 0.70 },
+    { id: "inner-zlc", name: "Innerforce Layer ZLC", speed: 1.10, ctl: 0.95, mass: 0.93, stiff: 0.75 },
+    { id: "amultart", name: "Amultart ZLC", speed: 1.12, ctl: 0.90, mass: 0.94, stiff: 0.80 },
+    { id: "zjk", name: "Zhang Jike Super ZLC", speed: 1.15, ctl: 0.82, mass: 1.04, stiff: 0.85 }
   ];
+  // soft: Weichheit des Schwamms (länger Ballkontakt), grip: Haftung der Oberfläche, absorb: dämpft den Spin des ankommenden Balls
   var RUBBERS = [
-    { id: "flextra", name: "Flextra", spin: 0.70, speed: 0.88, ctl: 1.30 },
-    { id: "sriver", name: "Sriver", spin: 0.85, speed: 0.92, ctl: 1.20 },
-    { id: "glayzer", name: "Glayzer", spin: 0.95, speed: 0.98, ctl: 1.15 },
-    { id: "rozena", name: "Rozena", spin: 1.05, speed: 1.03, ctl: 1.02 },
-    { id: "ten05", name: "Tenergy 05", spin: 1.00, speed: 1.00, ctl: 1.00 },
-    { id: "ten64", name: "Tenergy 64", spin: 1.06, speed: 0.96, ctl: 1.08 },
-    { id: "ten80", name: "Tenergy 80", spin: 0.98, speed: 1.07, ctl: 0.96 },
-    { id: "dig05", name: "Dignics 05", spin: 1.18, speed: 1.06, ctl: 0.95 },
-    { id: "dig09c", name: "Dignics 09C", spin: 1.25, speed: 1.02, ctl: 0.90 }
+    { id: "feint", name: "Feint Long III (lange Noppen)", spin: 0.30, speed: 0.78, ctl: 1.35, soft: 0.90, grip: 0.50, absorb: 0.60 },
+    { id: "flextra", name: "Flextra", spin: 0.70, speed: 0.88, ctl: 1.30, soft: 0.70, grip: 0.85, absorb: 0 },
+    { id: "sriver", name: "Sriver", spin: 0.85, speed: 0.92, ctl: 1.20, soft: 0.60, grip: 0.95, absorb: 0 },
+    { id: "sriver-fx", name: "Sriver FX", spin: 0.87, speed: 0.90, ctl: 1.18, soft: 0.80, grip: 0.95, absorb: 0 },
+    { id: "glayzer", name: "Glayzer", spin: 0.95, speed: 0.98, ctl: 1.15, soft: 0.55, grip: 1.00, absorb: 0 },
+    { id: "glayzer-09c", name: "Glayzer 09C", spin: 1.05, speed: 1.00, ctl: 1.05, soft: 0.50, grip: 1.10, absorb: 0 },
+    { id: "bryce", name: "Bryce", spin: 1.00, speed: 1.02, ctl: 1.05, soft: 0.55, grip: 1.05, absorb: 0 },
+    { id: "bryce-speed", name: "Bryce Speed", spin: 0.97, speed: 1.08, ctl: 0.98, soft: 0.50, grip: 1.00, absorb: 0 },
+    { id: "rozena", name: "Rozena", spin: 1.05, speed: 1.03, ctl: 1.02, soft: 0.50, grip: 1.10, absorb: 0 },
+    { id: "ten05", name: "Tenergy 05", spin: 1.00, speed: 1.00, ctl: 1.00, soft: 0.50, grip: 1.00, absorb: 0 },
+    { id: "ten05fx", name: "Tenergy 05 FX", spin: 1.00, speed: 0.97, ctl: 1.05, soft: 0.75, grip: 1.00, absorb: 0 },
+    { id: "ten64", name: "Tenergy 64", spin: 1.06, speed: 0.96, ctl: 1.08, soft: 0.40, grip: 1.05, absorb: 0 },
+    { id: "ten64fx", name: "Tenergy 64 FX", spin: 1.06, speed: 0.93, ctl: 1.10, soft: 0.65, grip: 1.05, absorb: 0 },
+    { id: "ten80", name: "Tenergy 80", spin: 0.98, speed: 1.07, ctl: 0.96, soft: 0.45, grip: 0.98, absorb: 0 },
+    { id: "ten80fx", name: "Tenergy 80 FX", spin: 0.98, speed: 1.04, ctl: 1.00, soft: 0.70, grip: 0.98, absorb: 0 },
+    { id: "ten19", name: "Tenergy 19", spin: 0.92, speed: 1.09, ctl: 0.93, soft: 0.35, grip: 0.92, absorb: 0 },
+    { id: "dig05", name: "Dignics 05", spin: 1.18, speed: 1.06, ctl: 0.95, soft: 0.40, grip: 1.20, absorb: 0 },
+    { id: "dig64", name: "Dignics 64", spin: 1.20, speed: 1.00, ctl: 0.98, soft: 0.30, grip: 1.25, absorb: 0 },
+    { id: "dig80", name: "Dignics 80", spin: 1.12, speed: 1.09, ctl: 0.90, soft: 0.35, grip: 1.15, absorb: 0 },
+    { id: "dig09c", name: "Dignics 09C", spin: 1.25, speed: 1.02, ctl: 0.90, soft: 0.35, grip: 1.30, absorb: 0 }
   ];
-  var GEAR = { V: 1, ctl: 1, spin: 1 };      // Gesamtwirkung der gewählten Ausrüstung
+  // Bälle: rest = Federung, drag = Luftwiderstand, mag = Magnus-Wirkung, mu = Haftung auf Platte, dwell = Kontaktdauer
+  var BALLS = [
+    { id: "std", name: "Butterfly 3-Star 40+", rest: 1.00, drag: 1.00, mag: 1.00, mu: 1.00, dwell: 1.00 },
+    { id: "g40", name: "Butterfly G40+ Turnierball", rest: 1.01, drag: 0.97, mag: 1.03, mu: 1.02, dwell: 0.97 },
+    { id: "train", name: "Butterfly Training 40+ (weich)", rest: 0.96, drag: 1.10, mag: 0.90, mu: 0.95, dwell: 1.20 },
+    { id: "alt", name: "Alter Hartball (abgenutzt)", rest: 1.04, drag: 0.88, mag: 0.85, mu: 0.85, dwell: 0.85 }
+  ];
+  var BALL = BALLS[0];
+  var GEAR = { V: 1, ctl: 1, spin: 1, soft: 0.5, grip: 1, mass: 1, stiff: 0.6, absorb: 0 };      // Gesamtwirkung der gewählten Ausrüstung
   function setGear(blade, rubber) {
     GEAR.V = blade.speed * rubber.speed;
     GEAR.ctl = blade.ctl * rubber.ctl;
     GEAR.spin = rubber.spin;
+    GEAR.soft = rubber.soft; GEAR.grip = rubber.grip; GEAR.absorb = rubber.absorb;
+    GEAR.mass = blade.mass; GEAR.stiff = blade.stiff;
+  }
+  // Dauer des Ballkontakts auf dem Schläger (Sekunden): weicher Belag und weiches Holz halten den Ball länger
+  function dwellTime() {
+    return clamp((0.032 + 0.026 * GEAR.soft) * (1.12 - 0.22 * GEAR.stiff) * BALL.dwell, 0.025, 0.07);
   }
 
   function computeSpin(p, ct) {
     var core = PR + R;
-    var f = clamp(Math.sqrt(p.sx * p.sx + p.sy * p.sy) / 600, 0.15, 1);
+    var f = clamp(Math.sqrt(p.sx * p.sx + p.sy * p.sy) / (600 / GEAR.grip), 0.15, 1);
     var h = clamp((ct.z - 22) / 24, -1, 1);
     var sp = clamp(h * (0.3 + 0.7 * f) + clamp(p.sx / 700, -0.5, 0.5), -1, 1);
     var sd = clamp(clamp(p.sy / 650, -1, 1) * 0.9 + clamp(ct.ry / core, -1, 1) * 0.25 * f, -1, 1);
@@ -7219,7 +7253,7 @@ var FigurenArt = (function () {
     lenGroup.mark(String(matchLen));
 
     // Ausrüstung: Holz bestimmt das Tempo, Belag den Spin
-    var blade = BLADES[2], rubber = RUBBERS[4];
+    var blade = BLADES[6], rubber = RUBBERS[9];             // Timo Boll ALC und Tenergy 05 als Grundausstattung
     try {
       var sb = localStorage.getItem(BLADE_KEY), sr = localStorage.getItem(RUBBER_KEY);
       BLADES.forEach(function (x) { if (x.id === sb) blade = x; });
@@ -7251,10 +7285,14 @@ var FigurenArt = (function () {
     }
     var tableSel = TABLES[0];
     try { var st0 = localStorage.getItem(TABLE_KEY); TABLES.forEach(function (x) { if (x.id === st0) tableSel = x; }); } catch (e) {}
-    var tableSelectEl = null;
+    var ballSel = BALLS[0];
+    try { var sb0 = localStorage.getItem(BALL_KEY); BALLS.forEach(function (x) { if (x.id === sb0) ballSel = x; }); } catch (e) {}
+    var tableSelectEl = null, ballSelectEl = null;
     function applyTable() {
       TBL = online ? TABLES[0] : tableSel;
+      BALL = online ? BALLS[0] : ballSel;
       if (tableSelectEl) { tableSelectEl.disabled = online; tableSelectEl.value = TBL.id; }
+      if (ballSelectEl) { ballSelectEl.disabled = online; ballSelectEl.value = BALL.id; }
     }
     var gearInfo = document.createElement("p");
     gearInfo.className = "msg";
@@ -7266,7 +7304,8 @@ var FigurenArt = (function () {
       gearInfo.textContent = "Holz " + blade.name + ": Tempo " + rate(blade.speed, 0.82, 1.17) + ", Kontrolle " + rate(blade.ctl, 0.8, 1.27) +
         ". Belag " + rubber.name + ": Spin " + rate(rubber.spin, 0.68, 1.27) + ", Tempo " + rate(rubber.speed, 0.86, 1.09) + ", Kontrolle " + rate(rubber.ctl, 0.88, 1.32) +
         ". Wie hart und mit wie viel Spin der Ball fliegt, hängt weiter von deinem Schlägertempo und der Bewegungsrichtung beim Treffen ab." +
-        (online ? " Online wird immer auf der Standardplatte gespielt." : " Platte: " + TBL.name + (TBL.mu < 0.12 ? ", der Drall greift kaum" : TBL.mu > 0.28 ? ", viel Grip, Spin wirkt stark" : "") + (TBL.rest > 0.93 ? ", der Ball springt hoch" : TBL.rest < 0.82 ? ", der Ball springt flach" : "") + ".");
+        " Der Ball bleibt beim Schlag etwa " + Math.round(dwellTime() * 1000) + " ms auf dem Schläger. In dieser Zeit wird deine Schlägerbewegung gemessen (Spin und Richtung)." +
+        (online ? " Online wird immer mit Standardplatte und Standardball gespielt." : " Platte: " + TBL.name + ", Ball: " + BALL.name + (TBL.mu < 0.12 ? ", der Drall greift kaum" : TBL.mu > 0.28 ? ", viel Grip, Spin wirkt stark" : "") + (TBL.rest > 0.93 ? ", der Ball springt hoch" : TBL.rest < 0.82 ? ", der Ball springt flach" : "") + ".");
     }
     gearBox.appendChild(gearSelect("tt-blade", "Holz", BLADES, blade, function (x) {
       blade = x; setGear(blade, rubber); showGear();
@@ -7283,6 +7322,13 @@ var FigurenArt = (function () {
     });
     tableSelectEl = tableLabel.querySelector("select");
     gearBox.appendChild(tableLabel);
+    var ballLabel = gearSelect("tt-ball", "Ball", BALLS, ballSel, function (x) {
+      ballSel = x; applyTable(); showGear();
+      try { localStorage.setItem(BALL_KEY, x.id); } catch (e) {}
+      if (S && S.state) S.previewAt = 0;
+    });
+    ballSelectEl = ballLabel.querySelector("select");
+    gearBox.appendChild(ballLabel);
     applyTable();
     showGear();
 
@@ -7834,8 +7880,8 @@ var FigurenArt = (function () {
       return { v1: plan(b.x, b.y, b.z, x1, y1, T1, sp, sd), xt2: xt2, yt2: yt2, T2: (0.62 - 0.14 * power) / Math.sqrt(V), sp: sp, sd: sd, q: q, power: power };
     }
 
-    function playerServe(ct) {
-      var b = S.ball, p = S.pl, sol = serveSolveL(b, ct, p);
+    function playerServe(ct, mot) {
+      var b = S.ball, p = S.pl, sol = serveSolveL(b, ct, mot || p);
       launch(b, sol.v1, sol.sp, sol.sd);
       S.serve2 = { xt: sol.xt2, yt: sol.yt2, T: sol.T2 };
       S.serveLeg = 1;
@@ -7895,7 +7941,7 @@ var FigurenArt = (function () {
       advance(b, dt);
       if (b.vz < 0 && S.pl.cd <= 0) {
         var ct = hits(S.pl, px, py, pz);
-        if (ct) { playerServe(ct); return; }
+        if (ct) { beginContact("serve", ct); return; }
       }
       if (b.z <= 0 && b.vz < 0) {                    // Ball verfehlt: noch einmal
         S.state = "serve";
@@ -7930,26 +7976,54 @@ var FigurenArt = (function () {
     // Kleiner Hinweis über dem Spielfeld (zum Beispiel "Smash!")
     function pop(text, x, y) { S.pop = { text: text, x: x, y: y, t: 0.9 }; }
 
+    // Ballkontakt: Der Ball bleibt für einen Bruchteil einer Sekunde auf dem Schläger (Schwamm wird eingedrückt).
+    // In dieser Zeit wird die Schlägerbewegung gemessen, vor allem das Ende des Kontakts zählt (dort löst sich der Ball).
+    // So entstehen Spin und Richtung aus dem Streichen über den Ball, und der Ball verlässt den Schläger erst danach.
+    function beginContact(kind, ct) {
+      var p = S.pl, b = S.ball;
+      S.contact = { kind: kind, ct: ct, t: 0, dur: dwellTime(), ox: ct.rx, oy: ct.ry, z0: Math.max(ct.z, 4), sx: 0, sy: 0, sw: 0, vx0: p.sx, vy0: p.sy };
+      b.vx = 0; b.vy = 0; b.vz = 0;
+      p.cd = 5;
+      p.flash = 0.18;
+    }
+
+    function stepContact(h) {
+      var c = S.contact, p = S.pl, b = S.ball;
+      c.t += h;
+      var w = 0.3 + 1.4 * Math.min(1, c.t / c.dur);          // späte Phase zählt mehr
+      c.sx += p.vx * w * h; c.sy += p.vy * w * h; c.sw += w * h;
+      b.x = p.x + c.ox; b.y = p.y + c.oy;
+      b.z = c.z0 - 3 * Math.sin(Math.PI * Math.min(1, c.t / c.dur));        // Ball wird leicht eingedrückt
+      if (c.t >= c.dur) {
+        S.contact = null;
+        var mx = c.sx / c.sw, my = c.sy / c.sw;
+        var mot = { sx: 0.4 * p.sx + 0.6 * mx, sy: 0.4 * p.sy + 0.6 * my };
+        b.x = p.x + c.ox; b.y = p.y + c.oy; b.z = c.z0;
+        if (c.kind === "serve") playerServe(c.ct, mot); else playerHit(c.ct, mot);
+      }
+    }
+
     // Du schlägst den Ball. Der Berührungspunkt (ct) entscheidet über Richtung und Qualität des Schlags:
     // In der Mitte des Schlägers ist der Schlag sauber, am Rand wird er schwächer und ungenauer ("Kantenball"),
     // und ein Ball hinter dem Schläger wird nur noch hochgeschoben. Tempo, Schlaghöhe und Schlägerbewegung geben Wucht.
-    function playerHit(ct) {
-      var b = S.ball, p = S.pl;
+    function playerHit(ct, mot) {
+      var b = S.ball, p = S.pl, m = mot || p;
       var core = PR + R, d = Math.sqrt(ct.rx * ct.rx + ct.ry * ct.ry);
       var q = d <= core ? 1 : 1 - 0.45 * clamp((d - core) / (PREACH - core), 0, 1);      // Treffer auf der Schlägermitte
       var behind = ct.rx < -core * 0.6;                           // Ball hinter der Schlägermitte
       if (behind) q *= 0.75;
       q *= 1 - 0.22 * clamp(Math.abs(ct.z - 26) / 30, 0, 1);      // beste Trefferhöhe: etwa auf Schlägerhöhe
       var inSp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-      var swing = Math.sqrt(p.sx * p.sx + p.sy * p.sy);
+      var swing = Math.sqrt(m.sx * m.sx + m.sy * m.sy);
       // Härte des Schlags: Schlägertempo nach vorn plus ein Teil der Ballenergie (Block)
-      var power = clamp(clamp(p.sx / 520, 0, 1) * 0.85 + clamp(Math.abs(p.sy) / 900, 0, 0.25) + clamp(inSp / 1100, 0, 1) * 0.2, 0, 1);
-      var smash = b.z >= 30 && p.sx > 260 && q > 0.75;            // hoher Ball und schneller Schlag nach vorn
+      var power = clamp(clamp(m.sx / 520, 0, 1) * 0.85 + clamp(Math.abs(m.sy) / 900, 0, 0.25) + clamp(inSp / 1100, 0, 1) * 0.2, 0, 1);
+      var smash = b.z >= 30 && m.sx > 260 && q > 0.75;            // hoher Ball und schneller Schlag nach vorn
       if (smash) power = clamp(power + 0.25, 0, 1);
       var V = GEAR.V;                                             // Holz und Belag: Tempo des Schlags
+      power = clamp(power * (0.92 + 0.08 * GEAR.mass), 0, 1);
       var xt = NETX + 60 + 175 * clamp(power * V, 0, 1.2) * (0.6 + 0.4 * q);
       // Richtung: Schlagrichtung des Schlägers und Treffpunkt auf dem Blatt
-      var swingSlope = clamp(p.sy / Math.max(140, Math.abs(p.sx)), -0.8, 0.8);
+      var swingSlope = clamp(m.sy / Math.max(140, Math.abs(m.sx)), -0.8, 0.8);
       var slope = clamp(ct.ry / PREACH * 0.7 + swingSlope * 0.55, -0.8, 0.8);
       var raw = b.y + slope * (xt - b.x);
       var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.5;  // leichte Hilfe, den Ball auf die Platte zu bringen
@@ -7957,11 +8031,13 @@ var FigurenArt = (function () {
       var loose = ((1 - q) * 70 + clamp((swing - 450) / 600, 0, 1) * 18) / GEAR.ctl + Math.max(0, V - 1) * 50;
       yt += loose * (Math.random() * 2 - 1);
       xt += loose * 0.55 * (Math.random() * 2 - 1);
-      var spin = computeSpin(p, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
+      var spin = computeSpin(m, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
+      sp = clamp(sp - 0.25 * clamp(b.sp, -1.3, 1.3) * GEAR.grip * (1 - GEAR.absorb), -1.6, 1.6);   // ankommender Spin wirkt zurück
+      sd = clamp(sd - 0.12 * clamp(b.sd, -1.3, 1.3) * (1 - GEAR.absorb), -1.6, 1.6);
       if (behind) sp = Math.min(sp, -0.2);
       // Spin des ankommenden Balls: Topspin springt länger, Unterschnitt kürzer, Seitenspin lenkt ab
-      xt += clamp(b.sp, -1, 1) * 28 * (1 - 0.6 * clamp(-p.sx / 200, 0, 1));
-      yt += clamp(b.sd, -1, 1) * 22;
+      xt += clamp(b.sp, -1, 1) * 28 * (1 - GEAR.absorb) * (1 - 0.6 * clamp(-m.sx / 200, 0, 1));
+      yt += clamp(b.sd, -1, 1) * 22 * (1 - GEAR.absorb);
       xt = clamp(xt, NETX + 30, TR + 40);
       var ramp = Math.min(0.12, S.rally * 0.007);                 // lange Ballwechsel werden schneller
       var T = Math.max(0.34, (0.74 - 0.24 * power - (smash ? 0.1 : 0) - ramp) / V);
@@ -8133,7 +8209,7 @@ var FigurenArt = (function () {
       if (keys.ArrowRight || keys.d) target.y += k;
       target.x = clamp(target.x, PXMIN, NETX - 16);
       target.y = clamp(target.y, PY0, PY1);
-      var f = 1 - Math.exp(-24 * dt);                       // leicht geglättet
+      var f = 1 - Math.exp(-24 / GEAR.mass * dt);           // leicht geglättet, ein schwereres Holz folgt träger
       p.x += (target.x - p.x) * f;
       p.y += (target.y - p.y) * f;
       p.vx = (p.x - ox) / dt; p.vy = (p.y - oy) / dt;
@@ -8198,7 +8274,7 @@ var FigurenArt = (function () {
 
       // Geschlagen wird erst, nachdem der Ball auf der eigenen Seite aufgesprungen ist
       var ct;
-      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && (ct = hits(S.pl, px, py, pz))) playerHit(ct);
+      if (S.bounced && S.expect === "L" && S.pl.cd <= 0 && (ct = hits(S.pl, px, py, pz))) beginContact("hit", ct);
       else if (!online && S.bounced && S.expect === "R" && S.cpu.cd <= 0 && (ct = hits(S.cpu, px, py, pz))) cpuHit(ct);
     }
 
@@ -8213,7 +8289,8 @@ var FigurenArt = (function () {
       if (S.shake > 0) S.shake = Math.max(0, S.shake - h * 3);
       if (S.state === "serve" && S.server === "L") { S.ball.x = S.pl.x + PR + 10; S.ball.y = S.pl.y; S.ball.z = 34; }
       else if (S.state === "serve" && online) { S.ball.x = S.cpu.x - PR - 10; S.ball.y = S.cpu.y; S.ball.z = 34; }
-      if (S.state === "rally") stepBall(h);
+      if (S.contact) stepContact(h);
+      else if (S.state === "rally") stepBall(h);
       else if (S.state === "toss") stepToss(h);
     }
 
@@ -8651,15 +8728,38 @@ var FigurenArt = (function () {
       e.preventDefault();
       turnAim(e.deltaY > 0 ? 1 : -1, 3);
     }, { passive: false });
-    canvas.addEventListener("pointermove", function (e) {
-      var p = canvasPoint(e);
-      target.x = p.x; target.y = p.y;
+    // Finger: Die Seite darf dabei nicht scrollen oder zoomen, sonst bricht die Bewegung ab.
+    canvas.style.touchAction = "none";
+    canvas.style.webkitUserSelect = "none"; canvas.style.userSelect = "none";
+    ["touchstart", "touchmove"].forEach(function (n) {
+      canvas.addEventListener(n, function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
     });
+    var TOUCH_LEAD = 46;                                  // Der Schläger liegt etwas vor dem Finger und bleibt sichtbar
+    function aimAt(e, jump) {
+      var p = canvasPoint(e);
+      target.x = p.x + (e.pointerType === "touch" ? TOUCH_LEAD : 0); target.y = p.y;
+      if (jump && S.pl && e.pointerType === "touch") {    // Aufsetzen des Fingers ist kein Schlag
+        var t = S.pl;
+        t.x = clamp(target.x, PXMIN, NETX - 16); t.y = clamp(target.y, PY0, PY1);
+        t.ox = t.x; t.oy = t.y; t.vx = 0; t.vy = 0; t.sx = 0; t.sy = 0;
+      }
+    }
+    canvas.addEventListener("pointermove", function (e) {
+      if (e.pointerType === "touch" && e.buttons === 0 && !touchDown) return;
+      aimAt(e, false);
+    });
+    var touchDown = false;
     canvas.addEventListener("pointerdown", function (e) {
       canvas.focus({ preventScroll: true });
-      var p = canvasPoint(e);
-      target.x = p.x; target.y = p.y;
+      if (e.pointerType === "touch") {
+        touchDown = true;
+        try { canvas.setPointerCapture(e.pointerId); } catch (er) {}
+      }
+      aimAt(e, true);
       tryServe();
+    });
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (n) {
+      canvas.addEventListener(n, function (e) { if (e.pointerType === "touch") touchDown = false; });
     });
 
     function onKey(e) {
