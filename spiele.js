@@ -6987,7 +6987,7 @@ var FigurenArt = (function () {
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
   var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
-  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte", BALL_KEY = "tischtennis-ball";
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte", CAM_KEY = "tischtennis-kamera", BALL_KEY = "tischtennis-ball";
 
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
@@ -7472,7 +7472,13 @@ var FigurenArt = (function () {
 
     box.appendChild(modeGroup.el);
     box.appendChild(levelGroup.el);
+    var camGroup = chipGroup("Kamera", { folgt: "Kamera folgt", fest: "Kamera fest", hoch: "Von oben" }, function (id) {
+      camMode = id; camGroup.mark(id);
+      try { localStorage.setItem(CAM_KEY, id); } catch (e) {}
+    });
+    camGroup.mark(camMode);
     box.appendChild(lenGroup.el);
+    box.appendChild(camGroup.el);
     box.appendChild(gearBox);
     box.appendChild(gearInfo);
     box.appendChild(lobby);
@@ -8473,18 +8479,41 @@ var FigurenArt = (function () {
     var CAM = { x: -190, y: MIDY, z: 360, th: 0.95, F: 400, cx: CW / 2, cy: 330 };
     CAM.c = Math.cos(CAM.th); CAM.s = Math.sin(CAM.th);
 
+    CAM.cw = 1; CAM.sw = 0; CAM.cyb = 330;             // Drehung der Kamera zur Seite (Gier) und Grundhöhe im Bild
     function proj(x, y, z) {
-      var rx = x - CAM.x, rz = z - CAM.z;
+      var ox = x - CAM.x, oy = y - CAM.y, rz = z - CAM.z;
+      var rx = ox * CAM.cw + oy * CAM.sw, ry = -ox * CAM.sw + oy * CAM.cw;
       var d = rx * CAM.c - rz * CAM.s;
       if (d < 8) return null;
       var up = rx * CAM.s + rz * CAM.c, k = CAM.F / d;
-      return { x: CAM.cx + (y - CAM.y) * k, y: CAM.cy - up * k, d: d, k: k };
+      return { x: CAM.cx + ry * k, y: CAM.cy - up * k, d: d, k: k };
     }
     function unproj(sx, sy, z0) {          // Bildpunkt -> Punkt auf der Ebene in Höhe z0
       var rc = (sx - CAM.cx) / CAM.F, uc = -(sy - CAM.cy) / CAM.F;
       var dz = -CAM.s + CAM.c * uc, dx = CAM.c + CAM.s * uc, t;
       t = dz > -0.02 ? 6000 : (z0 - CAM.z) / dz;
-      return { x: CAM.x + t * dx, y: CAM.y + t * rc };
+      var rx2 = t * dx, ry2 = t * rc;
+      return { x: CAM.x + rx2 * CAM.cw - ry2 * CAM.sw, y: CAM.y + rx2 * CAM.sw + ry2 * CAM.cw };
+    }
+    // Kamera: "folgt" schwenkt leicht mit dem Ball, "hoch" blickt steiler von oben, "fest" bleibt stehen
+    var camMode = "folgt", camT = 0;
+    try { var cm0 = localStorage.getItem(CAM_KEY); if (cm0 === "fest" || cm0 === "hoch" || cm0 === "folgt") camMode = cm0; } catch (e) {}
+    function updateCam() {
+      var now = performance.now(), dt = clamp((now - camT) / 1000, 0, 0.05); camT = now;
+      var k = 1 - Math.exp(-3.5 * dt), tx = -190, ty = MIDY, tz = 360, th = 0.95, yaw = 0, F = 400, cyb = 330;
+      if (camMode === "hoch") { tz = 470; th = 1.12; F = 380; cyb = 340; }
+      if (camMode !== "fest" && S && S.ball) {
+        var b = S.ball, fy = clamp(b.y, TT - 30, TB + 30), fx = clamp(b.x, 100, 700);
+        ty = MIDY + (fy - MIDY) * 0.30;
+        tx = -190 + (S.pl.x - 170) * 0.25;
+        tz += clamp(b.z, 0, 120) * 0.12;
+        yaw = Math.atan2(fy - ty, fx - tx) * 0.4;
+      }
+      CAM.x += (tx - CAM.x) * k; CAM.y += (ty - CAM.y) * k; CAM.z += (tz - CAM.z) * k;
+      CAM.th += (th - CAM.th) * k; CAM.F += (F - CAM.F) * k; CAM.cyb += (cyb - CAM.cyb) * k;
+      var cur = Math.atan2(CAM.sw, CAM.cw); cur += (yaw - cur) * k;
+      CAM.cw = Math.cos(cur); CAM.sw = Math.sin(cur);
+      CAM.c = Math.cos(CAM.th); CAM.s = Math.sin(CAM.th);
     }
     function poly3(pts, fill, stroke, lw) {
       var q = [], i;
@@ -8510,27 +8539,81 @@ var FigurenArt = (function () {
     function drawPaddle3(p, color, front, active) {
       var g = proj(p.x, p.y, 0), c = proj(p.x, p.y, PADZ);
       if (!g || !c) return;
-      var r = PR * 1.15 * c.k;
+      var r = PR * 1.15 * c.k, th = r * 0.16;
+      var tilt = clamp(p.sy / 900, -0.5, 0.5), rot = tilt * 0.5;
       ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.beginPath(); ctx.ellipse(g.x, g.y, r * 0.95, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "#8a6238"; ctx.lineWidth = r * 0.42; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(c.x, c.y + r * 0.8); ctx.lineTo(c.x + r * 0.18, c.y + r * 1.95); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(g.x + r * 0.15, g.y, r * 0.95, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+      var hx = c.x + r * 0.18 + tilt * r * 0.4, hy = c.y + r * 1.95;
+      if (p === S.pl) {                                   // Arm: kommt von unten ins Bild
+        var sx = c.x + (c.x - CW / 2) * 0.25 + r * 1.4, sy = CH + 50;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "#1c3f7a"; ctx.lineWidth = r * 1.15;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo((sx + hx) / 2 + r * 0.2, (sy + hy) / 2); ctx.stroke();
+        ctx.strokeStyle = "#e0b48c"; ctx.lineWidth = r * 0.82;
+        ctx.beginPath(); ctx.moveTo((sx + hx) / 2 + r * 0.2, (sy + hy) / 2); ctx.lineTo(hx, hy + r * 0.05); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = r * 0.22;
+        ctx.beginPath(); ctx.moveTo(sx - r * 0.3, sy); ctx.lineTo((sx + hx) / 2 - r * 0.1, (sy + hy) / 2); ctx.stroke();
+      }
+      ctx.strokeStyle = "#7a5430"; ctx.lineWidth = r * 0.42; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(c.x, c.y + r * 0.8); ctx.lineTo(hx, hy); ctx.stroke();
+      ctx.strokeStyle = "#a47a4a"; ctx.lineWidth = r * 0.16;
+      ctx.beginPath(); ctx.moveTo(c.x - r * 0.08, c.y + r * 0.8); ctx.lineTo(hx - r * 0.08, hy); ctx.stroke();
+      ctx.save();
+      ctx.translate(c.x, c.y); ctx.rotate(rot);
+      ctx.fillStyle = "#5b3d20";                           // Holzkante mit Dicke
+      ctx.beginPath(); ctx.ellipse(r * 0.07, th, r * 1.02, r * 0.99, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#101010";                           // Rückseite
+      ctx.beginPath(); ctx.ellipse(r * 0.03, th * 0.5, r * 1.01, r * 0.98, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "#151515";
-      ctx.beginPath(); ctx.ellipse(c.x, c.y, r, r * 0.97, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = color;
-      ctx.beginPath(); ctx.ellipse(c.x, c.y, r * 0.86, r * 0.83, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.2)";
-      ctx.beginPath(); ctx.ellipse(c.x - r * 0.25, c.y - r * 0.3, r * 0.4, r * 0.28, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(0, 0, r, r * 0.97, 0, 0, Math.PI * 2); ctx.fill();
+      var gr = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r * 0.9);
+      gr.addColorStop(0, "color-mix(in srgb, " + color + " 70%, #fff)"); gr.addColorStop(0.6, color); gr.addColorStop(1, "color-mix(in srgb, " + color + " 65%, #000)");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.ellipse(0, 0, r * 0.86, r * 0.83, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = Math.max(1, r * 0.05);
+      ctx.beginPath(); ctx.ellipse(0, 0, r * 0.7, r * 0.67, 0, 0.3, 2.2); ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.22)";
+      ctx.beginPath(); ctx.ellipse(-r * 0.28, -r * 0.32, r * 0.38, r * 0.22, -0.5, 0, Math.PI * 2); ctx.fill();
       if (front) {
         ctx.fillStyle = "rgba(0,0,0,0.35)";
-        ctx.beginPath(); ctx.ellipse(c.x, c.y, r * 0.86, r * 0.83, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, 0, r * 0.86, r * 0.83, 0, 0, Math.PI * 2); ctx.fill();
       }
+      ctx.restore();
       if (p.flash > 0) {
         ctx.strokeStyle = "rgba(255,255,255," + (p.flash / 0.18).toFixed(2) + ")";
         ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(c.x, c.y, r + (0.18 - p.flash) * 150 * c.k, 0, Math.PI * 2); ctx.stroke();
       }
       if (active) poly3(circle3(p.x, p.y, 0, p === S.pl ? PREACH : REACH, 40), "rgba(255,210,63,0.16)", "#ffd23f", 2.5);
+    }
+
+    // Gegner als einfache Figur hinter der Platte: Beine, Oberkörper, Kopf und Arm zum Schläger
+    function drawFigure(p) {
+      var bx = p.x + 60, by = MIDY + (p.y - MIDY) * 0.7;
+      var feet = proj(bx, by, FLOORZ), hip = proj(bx, by, 10), sh = proj(bx, by, 112), hd = proj(bx, by, 146), hand = proj(p.x + PR + 8, p.y, PADZ + 4);
+      var sw = proj(bx - 8, by - 4, 104);
+      if (!feet || !hip || !sh || !hd || !hand || !sw) return;
+      ctx.lineCap = "round";
+      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.beginPath(); ctx.ellipse(feet.x, feet.y, 34 * feet.k, 11 * feet.k, 0, 0, Math.PI * 2); ctx.fill();
+      var f1 = proj(bx, by - 13, FLOORZ), f2 = proj(bx, by + 13, FLOORZ), h1 = proj(bx, by - 9, 10), h2 = proj(bx, by + 9, 10);
+      ctx.strokeStyle = "#232a34"; ctx.lineWidth = 15 * hip.k;
+      if (f1 && h1) { ctx.beginPath(); ctx.moveTo(f1.x, f1.y); ctx.lineTo(h1.x, h1.y); ctx.stroke(); }
+      if (f2 && h2) { ctx.beginPath(); ctx.moveTo(f2.x, f2.y); ctx.lineTo(h2.x, h2.y); ctx.stroke(); }
+      var tg = ctx.createLinearGradient(sh.x - 24 * sh.k, 0, sh.x + 24 * sh.k, 0);
+      tg.addColorStop(0, "#f0c030"); tg.addColorStop(1, "#b88a10");
+      ctx.strokeStyle = tg; ctx.lineWidth = 46 * sh.k;
+      ctx.beginPath(); ctx.moveTo(hip.x, hip.y); ctx.lineTo(sh.x, sh.y); ctx.stroke();
+      ctx.strokeStyle = "#e0b48c"; ctx.lineWidth = 11 * sw.k;
+      ctx.beginPath(); ctx.moveTo(sw.x, sw.y); ctx.lineTo(hand.x, hand.y); ctx.stroke();
+      ctx.strokeStyle = "#f0c030"; ctx.lineWidth = 15 * sw.k;
+      ctx.beginPath(); ctx.moveTo(sw.x, sw.y); ctx.lineTo(sw.x + (hand.x - sw.x) * 0.35, sw.y + (hand.y - sw.y) * 0.35); ctx.stroke();
+      var hg = ctx.createRadialGradient(hd.x - 5 * hd.k, hd.y - 6 * hd.k, 2, hd.x, hd.y, 19 * hd.k);
+      hg.addColorStop(0, "#f2cfa8"); hg.addColorStop(1, "#c89468");
+      ctx.fillStyle = hg;
+      ctx.beginPath(); ctx.arc(hd.x, hd.y, 18 * hd.k, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#2a1c12";
+      ctx.beginPath(); ctx.arc(hd.x, hd.y - 3 * hd.k, 18.5 * hd.k, Math.PI * 1.02, Math.PI * 1.98); ctx.fill();
     }
 
     // ---------- Umgebung und Gestell je nach Platte ----------
@@ -8632,37 +8715,54 @@ var FigurenArt = (function () {
     }
 
     function drawNet3() {
-      var y0 = TT - NETEXT, y1 = TB + NETEXT, i;
-      poly3([[NETX, y0, 0], [NETX, y1, 0], [NETX, y1, NETH], [NETX, y0, NETH]], "rgba(235,240,245,0.28)");
-      for (i = 0; i <= 12; i++) { var yy = y0 + (y1 - y0) * i / 12; line3([NETX, yy, 0], [NETX, yy, NETH], "rgba(30,30,30,0.35)", 0.8); }
-      for (i = 1; i < 4; i++) line3([NETX, y0, NETH * i / 4], [NETX, y1, NETH * i / 4], "rgba(30,30,30,0.3)", 0.8);
-      line3([NETX, y0, NETH], [NETX, y1, NETH], "#f7f7f7", 3);
-      line3([NETX, y0, 0], [NETX, y0, NETH + 3], "#222", 4);
-      line3([NETX, y1, 0], [NETX, y1, NETH + 3], "#222", 4);
+      var y0 = TT - NETEXT, y1 = TB + NETEXT, i, N = 24;
+      function sag(t) { return NETH - 3.5 * (1 - Math.pow(2 * t - 1, 2)); }       // das Netz hängt in der Mitte etwas durch
+      poly3([[NETX + 6, y0, 0], [NETX + 16, y0, 0], [NETX + 16, y1, 0], [NETX + 6, y1, 0]], "rgba(0,0,0,0.16)");     // Schatten auf der Platte
+      var pts = [[NETX, y0, 0]];
+      for (i = 0; i <= N; i++) pts.push([NETX, y0 + (y1 - y0) * i / N, sag(i / N)]);
+      pts.push([NETX, y1, 0]);
+      poly3(pts, "rgba(235,240,245,0.26)");
+      for (i = 0; i <= 18; i++) { var t = i / 18, yy = y0 + (y1 - y0) * t; line3([NETX, yy, 0], [NETX, yy, sag(t)], "rgba(25,25,25,0.38)", 0.8); }
+      for (i = 1; i < 5; i++) {
+        var zf = i / 5, prev = null;
+        for (var j = 0; j <= N; j++) { var tt = j / N, pt = [NETX, y0 + (y1 - y0) * tt, sag(tt) * zf]; if (prev) line3(prev, pt, "rgba(25,25,25,0.3)", 0.8); prev = pt; }
+      }
+      var prevT = null;
+      for (i = 0; i <= N; i++) { var t2 = i / N, q = [NETX, y0 + (y1 - y0) * t2, sag(t2)]; if (prevT) line3(prevT, q, "#f7f7f7", 3.2); prevT = q; }
+      [y0, y1].forEach(function (yy) {                                          // Pfosten mit Klemme
+        line3([NETX, yy, 0], [NETX, yy, NETH + 4], "#1b1b1b", 4.5);
+        line3([NETX, yy, 0], [NETX, yy, NETH + 4], "rgba(255,255,255,0.25)", 1.2);
+        var ct = proj(NETX, yy, NETH + 4); if (ct) { ctx.fillStyle = "#2a2a2a"; ctx.beginPath(); ctx.arc(ct.x, ct.y, 4 * ct.k + 1.5, 0, Math.PI * 2); ctx.fill(); }
+      });
     }
 
     function drawBall3(b, ink) {
-      var s = proj(b.x, b.y, onTable(b.x, b.y) ? 0 : FLOORZ), p = proj(b.x, b.y, b.z);
+      var onT = onTable(b.x, b.y), s = proj(b.x, b.y, onT ? 0 : FLOORZ), p = proj(b.x, b.y, b.z);
       if (!p) return;
       var br = R * BALLVIS * p.k;
       if (s) {
-        ctx.fillStyle = "rgba(0,0,0," + (onTable(b.x, b.y) ? 0.32 : 0.2) + ")";
-        ctx.beginPath(); ctx.ellipse(s.x, s.y, br * 1.05, br * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+        var h = clamp(b.z / 140, 0, 1);
+        ctx.fillStyle = "rgba(0,0,0," + (onT ? 0.34 - 0.16 * h : 0.2) + ")";            // Schatten wird mit der Höhe weicher und größer
+        ctx.beginPath(); ctx.ellipse(s.x, s.y, br * (1.05 + 0.5 * h), br * (0.5 + 0.22 * h), 0, 0, Math.PI * 2); ctx.fill();
       }
-      var gr = ctx.createRadialGradient(p.x - br * 0.35, p.y - br * 0.4, br * 0.1, p.x, p.y, br);
-      gr.addColorStop(0, "#ffffff"); gr.addColorStop(1, "#f3dfb3");
+      if (onT && TBL.gloss > 0.5 && b.z > 0) {                                           // Spiegelbild auf der glänzenden Platte
+        var rp = proj(b.x, b.y, -b.z);
+        if (rp) { ctx.globalAlpha = Math.min(0.3, 0.12 * TBL.gloss); ctx.fillStyle = "#f3e6c4"; ctx.beginPath(); ctx.arc(rp.x, rp.y, br, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+      }
+      var gr = ctx.createRadialGradient(p.x - br * 0.38, p.y - br * 0.42, br * 0.08, p.x, p.y, br);
+      gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.55, "#f6ead0"); gr.addColorStop(1, "#d4b57a");
       ctx.fillStyle = gr;
       ctx.beginPath(); ctx.arc(p.x, p.y, br, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(p.x, p.y, br, 0, Math.PI * 2); ctx.stroke();
-      if (Math.abs(b.sp) + Math.abs(b.sd) > 0.08) {
-        ctx.strokeStyle = b.sp > 0.08 ? "#d6409f" : b.sp < -0.08 ? "#2447d6" : "#e8b400";
-        ctx.lineWidth = Math.max(1.5, br * 0.25);
-        ctx.beginPath();
-        ctx.moveTo(p.x + Math.cos(b.rot) * br, p.y + Math.sin(b.rot) * br);
-        ctx.lineTo(p.x - Math.cos(b.rot) * br, p.y - Math.sin(b.rot) * br);
-        ctx.stroke();
-      }
+      // Naht und Markenzeichen drehen sich mit dem Spin, so sieht man den Drall
+      var sc = Math.abs(b.sp) + Math.abs(b.sd) > 0.08 ? (b.sp > 0.08 ? "#d6409f" : b.sp < -0.08 ? "#2447d6" : "#e8b400") : "rgba(60,60,60,0.35)";
+      ctx.strokeStyle = sc; ctx.lineWidth = Math.max(1.2, br * 0.18);
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, br * 0.96, br * (0.2 + 0.5 * Math.abs(Math.sin(b.rot * 0.5))), b.rot, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "rgba(40,40,40,0.5)";
+      ctx.beginPath(); ctx.arc(p.x + Math.cos(b.rot * 1.3) * br * 0.45, p.y + Math.sin(b.rot * 1.3) * br * 0.45, br * 0.12, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.beginPath(); ctx.arc(p.x - br * 0.38, p.y - br * 0.42, br * 0.16, 0, Math.PI * 2); ctx.fill();
     }
 
     function draw() {
@@ -8673,7 +8773,9 @@ var FigurenArt = (function () {
       ctx.textBaseline = "alphabetic";
       var shk = S.shake > 0 ? S.shake : 0;               // Bildschirmwackeln bei einem Smash
       CAM.cx = CW / 2 + (Math.random() - 0.5) * shk * 16;
-      CAM.cy = 330 + (Math.random() - 0.5) * shk * 12;
+      updateCam();
+      CAM.cx = CW / 2 + (Math.random() - 0.5) * shk * 16;
+      CAM.cy = CAM.cyb + (Math.random() - 0.5) * shk * 12;
       var tcol = TBL.col || accent;
       drawEnv(TBL.env, tcol);
       drawLegs(TBL.legs);
@@ -8724,6 +8826,7 @@ var FigurenArt = (function () {
       // Tiefen-Reihenfolge: Computer-Schläger, Netz, Ball, dein Schläger (von hinten nach vorn)
       var hitWin = S.state === "rally" && S.bounced && b.z <= HITZ + 6;
       var dep = function (x, y, z) { var r = proj(x, y, z); return r ? r.d : 0; };
+      items.push({ d: dep(S.cpu.x + 60, MIDY + (S.cpu.y - MIDY) * 0.7, 60) + 30, f: function () { drawFigure(S.cpu); } });
       items.push({ d: dep(S.cpu.x, S.cpu.y, PADZ), f: function () { drawPaddle3(S.cpu, "#2b2b2b", true, false); } });
       items.push({ d: dep(NETX, MIDY, 10), f: drawNet3 });
       items.push({ d: dep(b.x, b.y, b.z), f: function () { drawBall3(b, ink); } });
@@ -8731,6 +8834,9 @@ var FigurenArt = (function () {
       items.sort(function (a, c) { return c.d - a.d; });
       items.forEach(function (it) { it.f(); });
 
+      var vg = ctx.createRadialGradient(CW / 2, CH * 0.5, CH * 0.35, CW / 2, CH * 0.5, CW * 0.72);   // Vignette: Blick wird zur Mitte gelenkt
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.38)");
+      ctx.fillStyle = vg; ctx.fillRect(0, 0, CW, CH);
       // Anzeigen
       drawSpinHud(ink, panel, b);
       if (!online) {                                              // Ausdauer
