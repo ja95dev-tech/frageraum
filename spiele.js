@@ -6992,8 +6992,17 @@ var FigurenArt = (function () {
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
     mittel: { name: "Mittel", speed: 370, err: 34, slip: 0.12, react: 0.3, spin: 0.35 },
-    schwer: { name: "Schwer", speed: 520, err: 14, slip: 0.04, react: 0.1, spin: 0.6 }
+    schwer: { name: "Schwer", speed: 520, err: 14, slip: 0.04, react: 0.1, spin: 0.6 },
+    meister: { name: "Meister", speed: 640, err: 7, slip: 0.015, react: 0.04, spin: 0.8 }
   };
+  // Turnier: vier Runden mit stärker werdenden Gegnern, jede Runde auf einer anderen Platte
+  var TOUR = [
+    { name: "Viertelfinale", level: "leicht", table: "schule" },
+    { name: "Halbfinale", level: "mittel", table: "gruen" },
+    { name: "Finale", level: "schwer", table: "hochglanz" },
+    { name: "Duell gegen den Meister", level: "meister", table: "glas" }
+  ];
+  var TITLE_KEY = "tischtennis-titel", AIM_KEY = "tischtennis-ziele";
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
@@ -7022,7 +7031,7 @@ var FigurenArt = (function () {
     b.vz -= (G + b.sp * DIP * BALL.mag * rel) * dt;         // Topspin zieht nach unten, Unterschnitt trägt
     // halbimplizit: erst Geschwindigkeit, dann Ort
     b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
-    var sm = Math.exp(-0.18 * dt);
+    var sm = Math.exp(-(0.10 + 0.10 * rel) * dt);       // schnelle Bälle verlieren im Flug mehr Drall
     b.sp *= sm; b.sd *= sm;
   }
 
@@ -7228,7 +7237,18 @@ var FigurenArt = (function () {
       };
     }
 
-    var online = false, net = null;
+    var online = false, net = null, modeId = "cpu";
+    var tour = { round: 0, table: TABLES[0] }, savedLevel = null;
+    function tourSetup() {
+      var r = TOUR[tour.round];
+      levelId = r.level;
+      TABLES.forEach(function (x) { if (x.id === r.table) tour.table = x; });
+      levelGroup.mark(levelId);
+    }
+    function tourLeave() {
+      try { var sv0 = localStorage.getItem(LEVEL_KEY); levelId = LEVELS[sv0] ? sv0 : "mittel"; } catch (e) { levelId = "mittel"; }
+      levelGroup.mark(levelId);
+    }
     var matchLen = 11;                        // Spielende offline: 5, 11 oder 21 Punkte
     try { var sl0 = Number(localStorage.getItem(LEN_KEY)); if (sl0 === 5 || sl0 === 11 || sl0 === 21) matchLen = sl0; } catch (e) {}            // online: gegen ein anderes Gerät mit Code
     var levelId = "mittel", aim = 0;            // aim: Aufschlagwinkel in Bogenmaß
@@ -7289,9 +7309,9 @@ var FigurenArt = (function () {
     try { var sb0 = localStorage.getItem(BALL_KEY); BALLS.forEach(function (x) { if (x.id === sb0) ballSel = x; }); } catch (e) {}
     var tableSelectEl = null, ballSelectEl = null;
     function applyTable() {
-      TBL = online ? TABLES[0] : tableSel;
+      TBL = online ? TABLES[0] : modeId === "tour" ? tour.table : tableSel;
       BALL = online ? BALLS[0] : ballSel;
-      if (tableSelectEl) { tableSelectEl.disabled = online; tableSelectEl.value = TBL.id; }
+      if (tableSelectEl) { tableSelectEl.disabled = online || modeId === "tour"; tableSelectEl.value = TBL.id; }
       if (ballSelectEl) { ballSelectEl.disabled = online; ballSelectEl.value = BALL.id; }
     }
     var gearInfo = document.createElement("p");
@@ -7305,7 +7325,7 @@ var FigurenArt = (function () {
         ". Belag " + rubber.name + ": Spin " + rate(rubber.spin, 0.68, 1.27) + ", Tempo " + rate(rubber.speed, 0.86, 1.09) + ", Kontrolle " + rate(rubber.ctl, 0.88, 1.32) +
         ". Wie hart und mit wie viel Spin der Ball fliegt, hängt weiter von deinem Schlägertempo und der Bewegungsrichtung beim Treffen ab." +
         " Der Ball bleibt beim Schlag etwa " + Math.round(dwellTime() * 1000) + " ms auf dem Schläger. In dieser Zeit wird deine Schlägerbewegung gemessen (Spin und Richtung)." +
-        (online ? " Online wird immer mit Standardplatte und Standardball gespielt." : " Platte: " + TBL.name + ", Ball: " + BALL.name + (TBL.mu < 0.12 ? ", der Drall greift kaum" : TBL.mu > 0.28 ? ", viel Grip, Spin wirkt stark" : "") + (TBL.rest > 0.93 ? ", der Ball springt hoch" : TBL.rest < 0.82 ? ", der Ball springt flach" : "") + ".");
+        (modeId === "tour" ? " Im Turnier bestimmt die Runde die Platte. " + TOUR[tour.round].name + " gegen Stufe " + LEVELS[levelId].name + "." : online ? " Online wird immer mit Standardplatte und Standardball gespielt." : " Platte: " + TBL.name + ", Ball: " + BALL.name + (TBL.mu < 0.12 ? ", der Drall greift kaum" : TBL.mu > 0.28 ? ", viel Grip, Spin wirkt stark" : "") + (TBL.rest > 0.93 ? ", der Ball springt hoch" : TBL.rest < 0.82 ? ", der Ball springt flach" : "") + ".");
     }
     gearBox.appendChild(gearSelect("tt-blade", "Holz", BLADES, blade, function (x) {
       blade = x; setGear(blade, rubber); showGear();
@@ -7334,6 +7354,7 @@ var FigurenArt = (function () {
 
     var info = document.createElement("p");
     info.className = "msg";
+    info.style.minHeight = "8.5em";                       // der Text wechselt oft: nichts darf darunter wandern
     info.setAttribute("aria-live", "polite");
     var row = document.createElement("div");
     row.className = "row";
@@ -7390,7 +7411,7 @@ var FigurenArt = (function () {
     help.className = "hint";
     help.textContent = "Du spielst unten und schlägst nach oben, der Computer spielt oben. Führe den Schläger mit Maus oder Finger über das Spielfeld, oder nutze die Pfeiltasten oder W, A, S, D. Lass den Ball erst aufspringen und triff ihn dann, solange der Ring um den Schläger leuchtet. Triffst du ihn mit der linken Kante, fliegt er nach rechts. Bewegst du den Schläger beim Treffer schnell nach oben zum Netz, wird der Schlag härter und länger. Spin entsteht aus deiner Bewegung: Triffst du den Ball früh und hoch mit schnellem Schlag nach vorn, gibt das Topspin (der Ball springt nach vorn). Triffst du ihn spät und tief oder ziehst den Schläger zurück, gibt das Unterschnitt (kurz und hoch). Bewegst du den Schläger beim Treffer zur Seite, bekommt der Ball Seitenspin und fliegt eine Kurve. Je schneller der Schläger, desto mehr Spin. Aufschlag: Leertaste oder Tippen wirft den Ball hoch, dann triffst du ihn, solange er fällt. Er muss zuerst auf deiner Hälfte aufspringen und dann über das Netz. Den Aufschlagwinkel drehst du mit den Knöpfen, mit Q und E oder mit dem Mausrad. Die gepunktete Linie zeigt die Flugbahn und das gelbe Kreuz den Landepunkt. Neben und hinter der Platte ist Platz: Weit geschlagene Bälle kannst du noch zurückspielen, solange sie nicht auf dem Boden aufkommen. Ausrüstung: Das Holz bestimmt das Tempo deiner Schläge, der Belag den Spin. Dein eigenes Schlägertempo und die Bewegungsrichtung beim Treffen zählen aber immer noch. Je länger ein Ballwechsel dauert, desto schneller wird der Ball. Smashes lassen den Bildschirm wackeln. Mit „Ton“ schaltest du die Geräusche ein oder aus, und bei „Spielende“ wählst du 5, 11 oder 21 Punkte (online immer 11). Online: Eine Person erstellt eine Partie und schickt den Code, die andere gibt ihn ein. Beide sehen sich selbst unten. Wer den Ball zuletzt gespielt hat, wartet auf die Entscheidung des Gegners.";
 
-    var modeGroup = chipGroup("Spielmodus", { cpu: "Gegen den Computer", online: "Online mit Code" }, function (id) { setMode(id); });
+    var modeGroup = chipGroup("Spielmodus", { cpu: "Gegen den Computer", tour: "Turnier", train: "Training", online: "Online mit Code" }, function (id) { setMode(id); });
     modeGroup.mark("cpu");
 
     var lobby = document.createElement("div");
@@ -7478,7 +7499,7 @@ var FigurenArt = (function () {
 
     function say(t) { info.textContent = t; }
     function oppName() { return online ? "Gegner" : "Computer"; }
-    function goal() { return online ? 11 : matchLen; }
+    function goal() { return online ? 11 : modeId === "train" ? 9999 : matchLen; }
     function kmh(v) { return Math.round(v * 0.09); }
 
     function newBall(x, y, z) { return { x: x, y: y, z: z, vx: 0, vy: 0, vz: 0, sp: 0, sd: 0, rot: 0 }; }
@@ -7490,12 +7511,47 @@ var FigurenArt = (function () {
         ball: newBall(150, MIDY, 40),
         pl: { x: 170, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 170, oy: MIDY, cd: 0, flash: 0 },
         cpu: { x: 600, y: MIDY, vx: 0, vy: 0, sx: 0, sy: 0, ox: 600, oy: MIDY, cd: 0, flash: 0, tx: 600, ty: MIDY, plan: false },
-        stats: { smash: 0, fast: 0, aces: 0 }, shake: 0, last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, frozen: false, pend: null, rng: null, trail: [], pop: null, cord: false, serveLeg: 0, serve2: null, preview: null, previewAt: 0
+        stats: { smash: 0, fast: 0, aces: 0 }, stam: 1, tgt: null, tpts: 0, tstreak: 0, thits: 0, shake: 0, last: null, expect: null, bounced: false, rally: 0, longest: 0, over: false, frozen: false, pend: null, rng: null, trail: [], pop: null, cord: false, serveLeg: 0, serve2: null, preview: null, previewAt: 0
       };
       banner = "";
+      if (modeId === "train") makeTargets();
       prepareServe();
       updateText();
       showView();
+    }
+
+    // ---------- Training: Zielfelder auf der Seite des Gegners ----------
+    function makeTargets() {
+      var list = [], tries = 0;
+      while (list.length < 3 && tries++ < 200) {
+        var x = NETX + 70 + Math.random() * (TR - NETX - 130), y = TT + 40 + Math.random() * (TB - TT - 80), ok = true;
+        list.forEach(function (t) { if ((t.x - x) * (t.x - x) + (t.y - y) * (t.y - y) < 80 * 80) ok = false; });
+        if (ok) list.push({ x: x, y: y, r: 30 });
+      }
+      S.tgt = list;
+    }
+    function checkTargets(b) {
+      if (!S.tgt) return;
+      var hit = -1, i;
+      for (i = 0; i < S.tgt.length; i++) {
+        var t = S.tgt[i], d = Math.sqrt((t.x - b.x) * (t.x - b.x) + (t.y - b.y) * (t.y - b.y));
+        if (d <= t.r + R * 0.5) { hit = i; t.d = d; break; }
+      }
+      if (hit < 0) { S.tstreak = 0; return; }
+      var pts = 1 + (S.tgt[hit].d < S.tgt[hit].r * 0.4 ? 1 : 0), bonus = Math.min(3, S.tstreak);
+      S.tstreak++; S.thits++; S.tpts += pts + bonus;
+      pop((pts > 1 ? "Volltreffer! +" : "Treffer! +") + (pts + bonus), b.x, b.y);
+      sfx("win");
+      S.tgt.splice(hit, 1);
+      var tries = 0;
+      while (S.tgt.length < 3 && tries++ < 100) {
+        var x = NETX + 70 + Math.random() * (TR - NETX - 130), y = TT + 40 + Math.random() * (TB - TT - 80), ok = true;
+        S.tgt.forEach(function (t2) { if ((t2.x - x) * (t2.x - x) + (t2.y - y) * (t2.y - y) < 80 * 80) ok = false; });
+        if (ok) S.tgt.push({ x: x, y: y, r: 30 });
+      }
+      var bestT = 0;
+      try { bestT = Number(localStorage.getItem(AIM_KEY)) || 0; if (S.tpts > bestT) localStorage.setItem(AIM_KEY, String(S.tpts)); } catch (e) {}
+      updateText();
     }
 
     function serverFor(points) {
@@ -7528,13 +7584,14 @@ var FigurenArt = (function () {
     }
 
     function updateText() {
-      var t = "Du " + S.score.L + " : " + S.score.R + " " + oppName();
+      var t = (modeId === "tour" ? TOUR[tour.round].name + ": " : "") + (modeId === "train" ? "Training: Punkte " + S.tpts + ", Treffer " + S.thits + ", Serie " + S.tstreak + ". " : "") + "Du " + S.score.L + " : " + S.score.R + " " + oppName();
       if (S.over) {
         t += S.score.L > S.score.R ? ". Du hast gewonnen" : (online ? ". Dein Gegner hat gewonnen" : ". Der Computer hat gewonnen");
         t += ". Deine Smashes: " + S.stats.smash + ", Asse: " + S.stats.aces + (S.stats.fast ? ", schnellster Ball: " + kmh(S.stats.fast) + " km/h" : "");
       }
       else if (S.rally > 1) t += ". Ballwechsel: " + S.rally;
       t += ". Rekord: längster Ballwechsel " + best + ".";
+      if (modeId === "train") { var bt = 0; try { bt = Number(localStorage.getItem(AIM_KEY)) || 0; } catch (e) {} t += " Bestwert Zielfelder: " + bt + "."; }
       if (online && net && net.players === 2 && !net.opp && !net.left) t += " Die Verbindung zum Gegner ist unterbrochen.";
       say(t);
     }
@@ -7616,8 +7673,8 @@ var FigurenArt = (function () {
       canvas.style.display = lob ? "none" : "";
       aimRow.style.display = lob ? "none" : "";
       row.style.display = lob ? "none" : "";
-      levelGroup.el.style.display = online ? "none" : "";
-      lenGroup.el.style.display = online ? "none" : "";
+      levelGroup.el.style.display = online || modeId === "tour" || modeId === "train" ? "none" : "";
+      lenGroup.el.style.display = online || modeId === "train" ? "none" : "";
       gearBox.style.display = lob ? "none" : "";
       gearInfo.style.display = lob ? "none" : "";
       startBtn.style.display = online && !S.over ? "none" : "";
@@ -7629,9 +7686,13 @@ var FigurenArt = (function () {
     }
 
     function setMode(m) {
-      if (m === (online ? "online" : "cpu")) return;
+      if (m === modeId) return;
       if (net) leaveNet();
+      if (modeId === "tour" || modeId === "train") tourLeave();
+      modeId = m;
       online = m === "online";
+      if (m === "tour") { tour.round = 0; tourSetup(); }
+      if (m === "train") { levelId = "leicht"; levelGroup.mark(levelId); }
       applyTable(); showGear();
       modeGroup.mark(m);
       lobbyMsg.textContent = "";
@@ -8021,6 +8082,8 @@ var FigurenArt = (function () {
       if (smash) power = clamp(power + 0.25, 0, 1);
       var V = GEAR.V;                                             // Holz und Belag: Tempo des Schlags
       power = clamp(power * (0.92 + 0.08 * GEAR.mass), 0, 1);
+      var tired = online ? 0 : clamp(1 - S.stam, 0, 1);             // Müdigkeit macht Schläge schwächer und ungenauer
+      power *= 1 - 0.22 * tired;
       var xt = NETX + 60 + 175 * clamp(power * V, 0, 1.2) * (0.6 + 0.4 * q);
       // Richtung: Schlagrichtung des Schlägers und Treffpunkt auf dem Blatt
       var swingSlope = clamp(m.sy / Math.max(140, Math.abs(m.sx)), -0.8, 0.8);
@@ -8029,6 +8092,7 @@ var FigurenArt = (function () {
       var yt = raw + (clamp(raw, TT + 16, TB - 16) - raw) * 0.5;  // leichte Hilfe, den Ball auf die Platte zu bringen
       // Ungenauigkeit: schlechter Treffpunkt und sehr schnelle Schläge nehmen Kontrolle
       var loose = ((1 - q) * 70 + clamp((swing - 450) / 600, 0, 1) * 18) / GEAR.ctl + Math.max(0, V - 1) * 50;
+      loose *= 1 + tired;
       yt += loose * (Math.random() * 2 - 1);
       xt += loose * 0.55 * (Math.random() * 2 - 1);
       var spin = computeSpin(m, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
@@ -8051,7 +8115,8 @@ var FigurenArt = (function () {
       p.flash = 0.18;
       var spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
       if (spd > S.stats.fast) S.stats.fast = spd;
-      if (smash) { S.stats.smash++; S.shake = 0.9; sfx("smash"); } else sfx("hit", power);
+      if (!online) S.stam = Math.max(0, S.stam - (0.035 + 0.06 * power));
+      if (smash) { S.stats.smash++; S.shake = 0.9; if (!online) S.slow = 0.5; sfx("smash"); } else sfx("hit", power);
       if (smash) pop("Smash! " + kmh(spd) + " km/h", p.x, p.y);
       else if (q < 0.7) pop("Kantenball", p.x, p.y);
       else if (behind) pop("Zu spät", p.x, p.y);
@@ -8106,6 +8171,7 @@ var FigurenArt = (function () {
       else { S.score[side]++; S.points++; }
       if (side === "L" && S.server === "L" && S.rally <= 1) S.stats.aces++;
       S.state = "point";
+      S.stam = Math.min(1, S.stam + 0.2);
       S.frozen = false; S.pend = null;
       sfx(side === "L" ? "win" : "lose");
       var a = S.score.L, b2 = S.score.R;
@@ -8117,6 +8183,15 @@ var FigurenArt = (function () {
         S.over = true;
         banner = a > b2 ? "Du gewinnst " + a + " : " + b2 + "!" : (online ? "Dein Gegner gewinnt " : "Computer gewinnt ") + b2 + " : " + a + ".";
         startBtn.textContent = "Noch ein Spiel";
+        if (!online) S.slow = 1.2;                              // Zeitlupe beim letzten Ball
+        if (modeId === "tour") {
+          if (a > b2 && tour.round < TOUR.length - 1) { banner = TOUR[tour.round].name + " gewonnen, " + a + " : " + b2 + "! Weiter gegen " + TOUR[tour.round + 1].name; startBtn.textContent = "Nächste Runde"; }
+          else if (a > b2) {
+            var titles = 0;
+            try { titles = (Number(localStorage.getItem(TITLE_KEY)) || 0) + 1; localStorage.setItem(TITLE_KEY, String(titles)); } catch (e) {}
+            banner = "Turniersieg! Du hast den Meister geschlagen (Titel: " + titles + ")"; startBtn.textContent = "Neues Turnier";
+          } else { banner = "Ausgeschieden im " + TOUR[tour.round].name + ", " + b2 + " : " + a; startBtn.textContent = "Neues Turnier"; }
+        }
         updateText();
         showView();
         return;
@@ -8147,6 +8222,7 @@ var FigurenArt = (function () {
 
     function onBounce(x) {
       var side = x < NETX ? "L" : "R";
+      if (modeId === "train" && S.last === "L" && side === "R" && !S.bounced) checkTargets(S.ball);
       if (!S.bounced) {
         if (side === S.expect) S.bounced = true;
         else fault(2);
@@ -8238,8 +8314,10 @@ var FigurenArt = (function () {
       b.rot += (b.sp * 11 + b.sd * 9) * dt;
 
       // Netz: beim Überqueren der Mitte muss der Ball hoch genug sein
-      if ((px < NETX) !== (b.x < NETX) && b.y > TT - NETEXT && b.y < TB + NETEXT && b.z < NETH + R * 0.4) {
-        if (b.z > NETH - 5 && !S.cord) {               // Netzroller: der Ball streift die Netzkante und trudelt weiter
+      var nu = (px < NETX) !== (b.x < NETX) && b.x !== px ? (NETX - px) / (b.x - px) : 0;      // Zeitpunkt der Netzüberquerung im Schritt
+      var nz = pz + (b.z - pz) * nu, ny = py + (b.y - py) * nu;                             // Höhe und Ort genau am Netz
+      if ((px < NETX) !== (b.x < NETX) && ny > TT - NETEXT && ny < TB + NETEXT && nz < NETH + R * 0.4) {
+        if (nz > NETH - 5 && !S.cord) {               // Netzroller: der Ball streift die Netzkante und trudelt weiter
           S.cord = true;
           b.vx *= 0.5; b.vz = Math.max(b.vz, 0) + 80; b.vy += ((S.rng ? S.rng() : Math.random()) - 0.5) * 160 * (online && S.last === "R" ? -1 : 1); b.sp *= 0.5; b.sd *= 0.5;
           pop("Netzroller!", b.x, b.y);
@@ -8247,7 +8325,12 @@ var FigurenArt = (function () {
         } else { sfx("net"); fault(1); return; }
       }
 
+      var bu = 1;
       if (b.z <= 0 && b.vz < 0) {
+        if (pz > 0) {                                      // genauer Aufsprungpunkt zwischen zwei Schritten
+          bu = pz / (pz - b.z);
+          b.x = px + (b.x - px) * bu; b.y = py + (b.y - py) * bu; b.z = 0;
+        }
         if (onTable(b.x, b.y)) {
           sfx("table", clamp(-b.vz / 500, 0, 1));
           var edge = Math.min(b.y - TT, TB - b.y, b.x - TL, TR - b.x);
@@ -8258,6 +8341,7 @@ var FigurenArt = (function () {
             b.vy += (er - 0.5) * 220 * (online && S.last === "R" ? -1 : 1);
             pop("Plattenkante!", b.x, b.y);
           }
+          if (S.serveLeg !== 1 && bu < 1) advance(b, (1 - bu) * dt);          // Rest des Schritts nach dem Aufsprung
           if (S.serveLeg === 1) {                              // erster Aufsprung des Aufschlags
             var own = S.last === "L" ? b.x < NETX : b.x >= NETX;
             if (!own) { fault(3); return; }
@@ -8284,6 +8368,7 @@ var FigurenArt = (function () {
       movePlayer(h);
       if (online) moveOpp(h); else moveCpu(h);
       S.pl.cd -= h; S.cpu.cd -= h;
+      if (S.stam < 1) S.stam = Math.min(1, S.stam + h * 0.012);
       S.pl.flash -= h; S.cpu.flash -= h;
       if (S.pop) { S.pop.t -= h; if (S.pop.t <= 0) S.pop = null; }
       if (S.shake > 0) S.shake = Math.max(0, S.shake - h * 3);
@@ -8300,7 +8385,7 @@ var FigurenArt = (function () {
       lastT = t;
       if (!document.hidden) {
         if (online) processInbox();
-        acc += dt;
+        if (S.slow > 0) { S.slow -= dt; acc += dt * 0.35; } else acc += dt;      // Zeitlupe bei Smash und letztem Ball
         var n = 0;
         while (acc >= STEP && n < 16) { step(STEP); acc -= STEP; n++; }
         if (acc > STEP) acc = 0;
@@ -8602,6 +8687,15 @@ var FigurenArt = (function () {
       var lw = proj(TL, MIDY, 0) ? Math.max(1.5, 2.4 * proj(TL, MIDY, 0).k) : 2;
       poly3([[TL + 2, TT + 2, 0], [TR - 2, TT + 2, 0], [TR - 2, TB - 2, 0], [TL + 2, TB - 2, 0]], null, "rgba(255,255,255,0.92)", lw);
       line3([TL, MIDY, 0], [TR, MIDY, 0], "rgba(255,255,255,0.85)", Math.max(1, lw * 0.7));
+      if (S.tgt && modeId === "train") {                         // Zielfelder
+        S.tgt.forEach(function (t) {
+          [[t.r, "rgba(255,210,63,0.55)"], [t.r * 0.62, "rgba(255,255,255,0.6)"], [t.r * 0.3, "rgba(198,47,58,0.9)"]].forEach(function (c) {
+            var pts = [], k;
+            for (k = 0; k < 24; k++) pts.push([t.x + Math.cos(k / 24 * 6.2832) * c[0], t.y + Math.sin(k / 24 * 6.2832) * c[0], 0]);
+            poly3(pts, c[1]);
+          });
+        });
+      }
       // Spur des Balls
       for (i = 0; i < S.trail.length - 1; i++) {
         p = proj(S.trail[i].x, S.trail[i].y, S.trail[i].z);
@@ -8639,6 +8733,12 @@ var FigurenArt = (function () {
 
       // Anzeigen
       drawSpinHud(ink, panel, b);
+      if (!online) {                                              // Ausdauer
+        ctx.globalAlpha = 0.85; ctx.fillStyle = panel; ctx.fillRect(CW - 142, 12, 130, 22);
+        ctx.globalAlpha = 1; ctx.fillStyle = S.stam > 0.35 ? "#1f8a5b" : "#c62f3a"; ctx.fillRect(CW - 138, 16, 122 * S.stam, 6);
+        ctx.fillStyle = ink; ctx.textAlign = "left"; ctx.font = "700 11px Georgia, serif";
+        ctx.fillText("Ausdauer" + (S.stam < 0.35 ? ": müde" : ""), CW - 138, 29);
+      }
       if (S.pop) {
         p = proj(S.pop.x, S.pop.y, 50);
         if (p) {
@@ -8748,11 +8848,17 @@ var FigurenArt = (function () {
       if (e.pointerType === "touch" && e.buttons === 0 && !touchDown) return;
       aimAt(e, false);
     });
-    var touchDown = false;
+    var touchDown = false, lockY = 0, lockX = 0;
+    function holdPage(e) { if (touchDown && e.cancelable) e.preventDefault(); }
+    function holdScroll() { if (touchDown && (window.scrollY !== lockY || window.scrollX !== lockX)) window.scrollTo(lockX, lockY); }
+    document.addEventListener("touchmove", holdPage, { passive: false });
+    window.addEventListener("scroll", holdScroll, { passive: true });
+    var oldOverscroll = document.documentElement.style.overscrollBehavior;
+    document.documentElement.style.overscrollBehavior = "none";
     canvas.addEventListener("pointerdown", function (e) {
       canvas.focus({ preventScroll: true });
       if (e.pointerType === "touch") {
-        touchDown = true;
+        touchDown = true; lockY = window.scrollY; lockX = window.scrollX;
         try { canvas.setPointerCapture(e.pointerId); } catch (er) {}
       }
       aimAt(e, true);
@@ -8775,6 +8881,10 @@ var FigurenArt = (function () {
     }
 
     startBtn.addEventListener("click", function () {
+      if (modeId === "tour") {
+        if (S.over && S.score.L > S.score.R && tour.round < TOUR.length - 1) tour.round++; else tour.round = 0;
+        tourSetup(); applyTable(); showGear();
+      }
       startBtn.textContent = "Neues Spiel";
       if (online) {
         if (!net || waiting()) return;
@@ -8803,6 +8913,9 @@ var FigurenArt = (function () {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("keyup", onKey);
       document.removeEventListener("farbe-geaendert", draw);
+      document.removeEventListener("touchmove", holdPage);
+      window.removeEventListener("scroll", holdScroll);
+      document.documentElement.style.overscrollBehavior = oldOverscroll || "";
       leaveNet();
     };
   }
