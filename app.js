@@ -552,6 +552,7 @@
     "Beim Schach stellst du die Stärke des Computers von 400 bis 1800 Elo ein. Mit „Online mit Code“ spielst du gegen ein anderes Gerät.",
     "Die Rennstrecke führt unter Wasser über 3 Runden. Weiche den Löchern aus oder spring über die Rampen, sammle Muscheln für Turbo, Blasenschild oder Sprung und setze sie mit Leertaste oder E ein.",
     "Die Uhr kann auch Stoppuhr, Timer und Wecker.",
+    "Im Reiter Advent öffnet sich im Dezember jeden Tag ein neues Türchen mit einer Sport- und einer Website-Aufgabe.",
     "Mit Strg+Enter sendest du eine Frage ab, ohne zur Maus zu greifen.",
     "Beim Tischtennis lässt du den Ball erst aufspringen und schlägst ihn dann. Wo er den Schläger trifft, bestimmt die Richtung.",
     "Im Quallen-Shop tauschst du Quallen gegen dauerhafte Fähigkeiten, statt nur den Bonus zu behalten."
@@ -749,7 +750,7 @@
   var tabs = document.querySelectorAll(".tab");
   var panels = {
     start: $("panel-start"), fragen: $("panel-fragen"), spiele: $("panel-spiele"),
-    spielstand: $("panel-spielstand"), uhr: $("panel-uhr"), farbe: $("panel-farbe")
+    spielstand: $("panel-spielstand"), uhr: $("panel-uhr"), advent: $("panel-advent"), farbe: $("panel-farbe")
   };
 
   function showTab(name) {
@@ -760,13 +761,16 @@
     stopTools();
     if (name === "start") initStart();
     else if (name === "spiele") initGames();
-    else if (name === "spielstand" || name === "uhr") initTool(name);
+    else if (name === "spielstand" || name === "uhr" || name === "advent") initTool(name);
     else if (name === "fragen") $("q").focus({ preventScroll: true });
   }
 
   tabs.forEach(function (t) {
     t.addEventListener("click", function () { showTab(t.dataset.tab); });
   });
+
+  // Der Adventskalender springt von seinen Aufgaben direkt zu einem Spiel oder Reiter
+  window.AdventNav = { openGame: openGame, showTab: showTab };
 
   // ======================================================================
   // spiele.js laden (Spiele, Uhr und Spielstand stecken in dieser einen Datei)

@@ -11138,3 +11138,352 @@ var FigurenArt = (function () {
     _engine: { WORDS: WORDS, dailyWord: dailyWord, dayNumber: dayNumber, score: score, berlinDate: berlinDate, dateOfDay: dateOfDay }
   });
 })();
+
+;
+// ===== advent.js =====
+// © 2026 BlaueQualle. Alle Rechte vorbehalten.
+// Werkzeug: Adventskalender (24 Türchen im Dezember, jedes öffnet sich erst an seinem Tag,
+// je Türchen eine kleine Sportaufgabe und eine Aufgabe auf der Website, Weihnachtsdesign mit Quallen)
+(function () {
+  "use strict";
+
+  var KEY = "advent-v1";   // { "2026": { "5": 3 } }  Bit 1 = Sport geschafft, Bit 2 = Website-Aufgabe geschafft, Bit 4 = Sport nicht geschafft, Bit 8 = Website-Aufgabe nicht geschafft
+
+  // g = Spiel (id wie in app.js), t = Reiter; b = Beschriftung des Knopfes
+  var TASKS = [
+    { s: "10 Hampelmänner", w: "Spiele Snake und sammle mindestens 5 Punkte.", g: "snake", b: "Snake spielen" },
+    { s: "20 Sekunden Unterarmstütz (Plank), auf den Knien ist auch okay", w: "Löse das Wort von heute bei Wortraten.", g: "wortraten", b: "Wortraten öffnen" },
+    { s: "10 Kniebeugen", w: "Erreiche in 2048 mindestens die Kachel 128.", g: "2048", b: "2048 spielen" },
+    { s: "Steh 30 Sekunden auf einem Bein, danach auf dem anderen", w: "Flaggenraten: errate mindestens 10 von 20 Flaggen.", g: "flaggenraten", b: "Flaggenraten öffnen" },
+    { s: "Kreise 15 Mal die Arme vorwärts und 15 Mal rückwärts", w: "Baue im Quallen-Imperium 5 Fabriken.", g: "quallenimperium", b: "Quallen-Imperium öffnen" },
+    { s: "10 Liegestütze, an der Wand oder auf den Knien ist auch gut", w: "Löse Minesweeper in der Stufe leicht.", g: "minesweeper", b: "Minesweeper öffnen" },
+    { s: "Lauf eine Minute lang auf der Stelle", w: "Autorennen: sammle in einer Fahrt mindestens 5 Münzen.", g: "autorennen", b: "Autorennen öffnen" },
+    { s: "10 Ausfallschritte, 5 pro Seite", w: "Rennstrecke: fahre eine Runde, ohne in ein Loch zu fallen.", g: "rennstrecke", b: "Rennstrecke öffnen" },
+    { s: "Beuge dich 10 Mal nach vorn und versuche, den Boden zu berühren", w: "Stelle der KI eine Frage über Quallen oder Weihnachten.", t: "fragen", b: "Zu den Fragen" },
+    { s: "Wandsitzen: 20 Sekunden mit dem Rücken an der Wand, als säßest du auf einem Stuhl", w: "Tischtennis: erziele 3 Punkte gegen den Computer.", g: "tischtennis", b: "Tischtennis öffnen" },
+    { s: "30 Sekunden Seilspringen ohne Seil", w: "Spiele eine Runde Solitär.", g: "solitaer", b: "Solitär öffnen" },
+    { s: "15 Mal auf die Zehenspitzen rauf und runter", w: "Quallen-Runner: spiele 3 Runden und versuche, deinen Rekord zu schlagen.", g: "quallenrunner", b: "Quallen-Runner öffnen" },
+    { s: "Quallen-Tanz: eine Minute lang die Arme wie Tentakel wellenförmig bewegen", w: "Mische im Reiter Farbe einen Verlauf aus 3 Farben.", t: "farbe", b: "Zu den Farben" },
+    { s: "10 Bergsteiger (Kniezug im Liegestütz, auf den Knien ist auch okay)", w: "Rennstrecke: sammle eine Muschel und setze das Item ein.", g: "rennstrecke", b: "Rennstrecke öffnen" },
+    { s: "20 Hampelmänner", w: "Wortraten: löse das heutige Wort mit höchstens 4 Versuchen.", g: "wortraten", b: "Wortraten öffnen" },
+    { s: "Geh 2 Mal die Treppe hoch und runter, oder 2 Minuten zügig durch die Wohnung", w: "Snake: erreiche mindestens 10 Punkte.", g: "snake", b: "Snake spielen" },
+    { s: "Kreise die Schultern 10 Mal und geh dann 5 Minuten spazieren", w: "Stelle im Reiter Uhr einen Timer auf 2 Minuten und lass ihn ablaufen.", t: "uhr", b: "Zur Uhr" },
+    { s: "5 Burpees, oder 5 Mal aus der Hocke aufspringen", w: "Spiele eine Partie Schach gegen den Computer auf Stärke 400.", g: "schach", b: "Schach öffnen" },
+    { s: "Zieh im Stehen Socken oder Schuhe an, ohne dich abzustützen", w: "Flaggenraten Europa: mindestens 12 von 20 Flaggen.", g: "flaggenraten", b: "Flaggenraten öffnen" },
+    { s: "2 Minuten dehnen: Arme, Beine und Rücken", w: "Minesweeper: versuche die Stufe mittel.", g: "minesweeper", b: "Minesweeper öffnen" },
+    { s: "20 Kniebeugen", w: "Erreiche in 2048 die Kachel 256.", g: "2048", b: "2048 spielen" },
+    { s: "30 Sekunden Unterarmstütz (Plank)", w: "Rennstrecke: schaffe 3 Runden und speichere eine Bestzeit.", g: "rennstrecke", b: "Rennstrecke öffnen" },
+    { s: "30 Hampelmänner, du schaffst das!", w: "Spiele 5 Minuten im Quallen-Imperium.", g: "quallenimperium", b: "Quallen-Imperium öffnen" },
+    { s: "Heiligabend: 15 Minuten Winterspaziergang an der frischen Luft", w: "Spiele dein Lieblingsspiel und zeig jemandem deinen Rekord.", t: "spiele", b: "Zu den Spielen" }
+  ];
+
+  // ---------- Daten ----------
+  function load() {
+    try { var v = JSON.parse(localStorage.getItem(KEY)); if (v && typeof v === "object") return v; } catch (e) {}
+    return {};
+  }
+  function save(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {} }
+  function nowDate() { return window.__adventNow ? new Date(window.__adventNow) : new Date(); }
+
+  // Wie weit ist der Kalender? open = Türchen, die schon offen sein dürfen; today = heutiges Türchen (0 = keins)
+  function status() {
+    var n = nowDate(), y = n.getFullYear(), m = n.getMonth(), d = n.getDate();
+    var open = m < 11 ? 0 : (m === 11 ? Math.min(d, 24) : 24);
+    var today = m === 11 && d <= 24 ? d : 0;
+    var start = new Date(y, 11, 1), t0 = new Date(y, m, d);
+    return { y: y, open: open, today: today, daysToStart: m < 11 ? Math.round((start - t0) / 86400000) : 0 };
+  }
+
+  function dayLabel(y, d) {
+    try { return new Date(y, 11, d).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" }); }
+    catch (e) { return d + ". Dezember"; }
+  }
+
+  // ---------- Bilder ----------
+  // Qualle mit Weihnachtsmütze (nur feste Zeichen, kein fremder Text)
+  function jelly(body, hat, extra) {
+    var s = '<svg viewBox="0 0 64 72" aria-hidden="true" focusable="false"' + (extra ? ' class="' + extra + '"' : "") + ">";
+    s += '<g fill="none" stroke="' + body + '" stroke-width="3" stroke-linecap="round" opacity="0.85">' +
+      '<path d="M20 40 q-5 8 0 15 t0 14"/><path d="M28 42 q4 9 0 16 t0 12"/><path d="M36 42 q-4 9 0 16 t0 12"/><path d="M44 40 q5 8 0 15 t0 14"/></g>';
+    s += '<path d="M12 40 Q12 20 32 20 Q52 20 52 40 Z" fill="' + body + '" opacity="0.88"/>';
+    s += '<ellipse cx="25" cy="30" rx="5" ry="3" fill="#fff" opacity="0.35"/>';
+    s += '<circle cx="26" cy="35" r="2" fill="#12305a"/><circle cx="38" cy="35" r="2" fill="#12305a"/>';
+    s += '<path d="M29 38.5 q3 2.5 6 0" fill="none" stroke="#12305a" stroke-width="1.4" stroke-linecap="round"/>';
+    if (hat) {
+      s += '<path d="M18 24 Q22 4 46 8 Q40 14 46 26 Z" fill="#d62839"/>';
+      s += '<rect x="15" y="22" width="36" height="7" rx="3.5" fill="#fff"/>';
+      s += '<circle cx="47" cy="8" r="4.5" fill="#fff"/>';
+    }
+    return s + "</svg>";
+  }
+
+  var CSS =
+    ".adv{position:relative;overflow:hidden;border-radius:.9rem;padding:1rem 1rem 1.4rem;color:#eaf6ff;" +
+    "background:linear-gradient(180deg,#0a1a38 0%,#123a5e 60%,#0e4b57 100%);border:1px solid #1d4f7a}" +
+    ".adv *{box-sizing:border-box}" +
+    ".adv-in{position:relative;z-index:1}" +
+    ".adv-snow{position:absolute;inset:0;pointer-events:none;z-index:0}" +
+    ".adv-flake{position:absolute;top:-8%;border-radius:50%;background:#fff;opacity:.8;animation:adv-fall linear infinite}" +
+    "@keyframes adv-fall{from{transform:translate(0,0)}50%{transform:translate(18px,260px)}to{transform:translate(-8px,560px)}}" +
+    ".adv-lights{display:flex;justify-content:space-between;padding:0 .2rem;margin:-.2rem 0 .6rem;border-top:2px solid #1b2d44}" +
+    ".adv-bulb{width:.7rem;height:.95rem;border-radius:50% 50% 55% 55%;margin-top:-1px;animation:adv-blink 2.4s ease-in-out infinite}" +
+    ".adv-bulb:nth-child(4n+1){background:#ff4d5e;box-shadow:0 0 .6rem #ff4d5e}" +
+    ".adv-bulb:nth-child(4n+2){background:#ffd35c;box-shadow:0 0 .6rem #ffd35c;animation-delay:-.6s}" +
+    ".adv-bulb:nth-child(4n+3){background:#4cd98a;box-shadow:0 0 .6rem #4cd98a;animation-delay:-1.2s}" +
+    ".adv-bulb:nth-child(4n){background:#5cc8ff;box-shadow:0 0 .6rem #5cc8ff;animation-delay:-1.8s}" +
+    "@keyframes adv-blink{0%,100%{opacity:1}50%{opacity:.35}}" +
+    ".adv-head{display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem}" +
+    ".adv-head svg{width:4.2rem;height:4.7rem;flex:none;animation:adv-bob 4s ease-in-out infinite}" +
+    "@keyframes adv-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}" +
+    ".adv h2{margin:0;font-size:1.5rem;color:#fff;font-family:var(--serif,Georgia,serif)}" +
+    ".adv-lead{margin:.2rem 0 0;color:#cfe7f7;line-height:1.45}" +
+    ".adv-prog{margin:.8rem 0 1rem}" +
+    ".adv-bar{height:.55rem;border-radius:99px;background:rgba(255,255,255,.15);overflow:hidden}" +
+    ".adv-bar>span{display:block;height:100%;background:linear-gradient(90deg,#4cd98a,#ffd35c);border-radius:99px;transition:width .4s}" +
+    ".adv-count{margin:.35rem 0 0;font-size:.9rem;color:#cfe7f7}" +
+    ".adv-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}" +
+    "@media (min-width:36rem){.adv-grid{grid-template-columns:repeat(6,1fr)}}" +
+    ".adv-door{position:relative;border:0;cursor:pointer;font:inherit;color:#fff;aspect-ratio:1/1.05;border-radius:.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.1rem;" +
+    "box-shadow:inset 0 0 0 2px rgba(255,255,255,.28),0 3px 8px rgba(0,0,0,.35);transition:transform .15s}" +
+    ".adv-door:nth-child(2n){background:linear-gradient(160deg,#d63a4a,#a41d2e)}" +
+    ".adv-door:nth-child(2n+1){background:linear-gradient(160deg,#2a9560,#176b42)}" +
+    ".adv-door:nth-child(5n){background:linear-gradient(160deg,#3d7fd0,#1f4f9a)}" +
+    ".adv-door:hover:not(.locked){transform:translateY(-2px) rotate(-1.5deg)}" +
+    ".adv-door:focus-visible{outline:3px solid #ffd35c;outline-offset:2px}" +
+    ".adv-num{font-family:var(--serif,Georgia,serif);font-size:1.7rem;font-weight:700;line-height:1;text-shadow:0 2px 3px rgba(0,0,0,.4)}" +
+    ".adv-tag{font-size:.7rem;opacity:.95}" +
+    ".adv-door svg{width:1.6rem;height:1.8rem}" +
+    ".adv-door.locked{filter:saturate(.35) brightness(.7);cursor:not-allowed}" +
+    ".adv-door.today{box-shadow:inset 0 0 0 3px #ffd35c,0 0 1rem #ffd35c;animation:adv-glow 2s ease-in-out infinite}" +
+    "@keyframes adv-glow{0%,100%{box-shadow:inset 0 0 0 3px #ffd35c,0 0 .5rem #ffd35c}50%{box-shadow:inset 0 0 0 3px #ffd35c,0 0 1.3rem #ffd35c}}" +
+    ".adv-door.sel{transform:scale(1.05)}" +
+    ".adv-door.skip::after{content:'\\2713';position:absolute;top:.15rem;right:.35rem;color:#cfe7f7;font-size:1rem}" +
+    ".adv-door.done::after{content:'\\2605';position:absolute;top:.15rem;right:.35rem;color:#ffd35c;font-size:1.05rem;text-shadow:0 0 .4rem #ffd35c}" +
+    ".adv-detail{margin-top:1rem;padding:1rem;border-radius:.7rem;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.22)}" +
+    ".adv-detail h3{margin:0 0 .6rem;font-size:1.15rem;color:#ffe9a8;font-family:var(--serif,Georgia,serif)}" +
+    ".adv-task{padding:.7rem 0;border-top:1px solid rgba(255,255,255,.15)}" +
+    ".adv-task:first-of-type{border-top:0;padding-top:0}" +
+    ".adv-kind{margin:0 0 .2rem;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:#9fd6f5}" +
+    ".adv-text{margin:0 0 .5rem;font-size:1.05rem;line-height:1.4;color:#fff}" +
+    ".adv-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem}" +
+    ".adv-chk{display:inline-flex;align-items:center;gap:.45rem;cursor:pointer;color:#fff}" +
+    ".adv-chk input{width:1.2rem;height:1.2rem;accent-color:#4cd98a;margin:0}" +
+    ".adv-go{border:0;cursor:pointer;font:inherit;font-weight:600;padding:.5rem 1rem;border-radius:.4rem;background:#ffd35c;color:#3a2a00}" +
+    ".adv-go:hover{background:#ffe08a}" +
+    ".adv-ok{margin:.7rem 0 0;padding:.6rem .8rem;border-radius:.5rem;background:rgba(76,217,138,.2);color:#d8ffe8}" +
+    ".adv-note{margin:.8rem 0 0;font-size:.85rem;color:#9fd6f5}" +
+    ".adv-msg{margin:.8rem 0 0;color:#ffe9a8}" +
+    "@media (prefers-reduced-motion:reduce){.adv *{animation:none!important;transition:none!important}}";
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  // ---------- Oberfläche ----------
+  function start(box) {
+    if (!document.getElementById("advent-css")) {
+      var st = document.createElement("style");
+      st.id = "advent-css";
+      st.textContent = CSS;
+      document.head.appendChild(st);
+    }
+
+    var data = load();
+    var stat = status();
+    var selected = stat.today || 0;
+    var alive = true, i;
+
+    var root = el("div", "adv");
+    var snow = el("div", "adv-snow");
+    snow.setAttribute("aria-hidden", "true");
+    for (i = 0; i < 26; i++) {
+      var fl = el("span", "adv-flake"), sz = 3 + (i * 7) % 5;
+      fl.style.left = ((i * 37) % 100) + "%";
+      fl.style.width = fl.style.height = sz + "px";
+      fl.style.animationDuration = (9 + (i * 5) % 9) + "s";
+      fl.style.animationDelay = "-" + ((i * 3) % 12) + "s";
+      snow.appendChild(fl);
+    }
+    root.appendChild(snow);
+
+    var inner = el("div", "adv-in");
+    root.appendChild(inner);
+    var lights = el("div", "adv-lights");
+    lights.setAttribute("aria-hidden", "true");
+    for (i = 0; i < 14; i++) lights.appendChild(el("span", "adv-bulb"));
+    inner.appendChild(lights);
+
+    var head = el("div", "adv-head");
+    var pic = el("div");
+    pic.innerHTML = jelly("#7fd8ff", true);
+    var ht = el("div");
+    ht.appendChild(el("h2", "", "Qualle Adventskalender"));
+    ht.appendChild(el("p", "adv-lead", "24 Türchen im Dezember. Jedes öffnet sich erst an seinem Tag. Pro Türchen gibt es eine kleine Sportaufgabe und eine Aufgabe hier auf der Website."));
+    head.appendChild(pic.firstChild);
+    head.appendChild(ht);
+    inner.appendChild(head);
+
+    var prog = el("div", "adv-prog");
+    var bar = el("div", "adv-bar"), fill = el("span");
+    bar.appendChild(fill);
+    var count = el("p", "adv-count");
+    prog.appendChild(bar);
+    prog.appendChild(count);
+    inner.appendChild(prog);
+
+    var grid = el("div", "adv-grid");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", "Türchen");
+    inner.appendChild(grid);
+    var msg = el("p", "adv-msg");
+    msg.setAttribute("role", "status");
+    inner.appendChild(msg);
+    var detail = el("div", "adv-detail");
+    detail.hidden = true;
+    detail.setAttribute("aria-live", "polite");
+    inner.appendChild(detail);
+    inner.appendChild(el("p", "adv-note", "Mach nur so viel, wie sich für dich gut anfühlt, und hör auf, wenn etwas wehtut. Du kannst frühere Türchen jederzeit nachträglich öffnen und abhaken, auch wenn du etwas nicht geschafft hast. Dein Fortschritt wird in diesem Browser gespeichert."));
+    box.appendChild(root);
+
+    function bits(d) { var y = data[stat.y]; return y && typeof y[d] === "number" ? y[d] : 0; }
+    function setBit(d, bit, on) {
+      if (!data[stat.y]) data[stat.y] = {};
+      var v = bits(d);
+      data[stat.y][d] = on ? (v | bit) : (v & ~bit);
+      save(data);
+    }
+    function resolved(d) { var v = bits(d); return (v & 5) !== 0 && (v & 10) !== 0; }   // beide Aufgaben abgehakt (geschafft oder nicht)
+    function doneCount() { var c = 0; for (var d = 1; d <= 24; d++) if ((bits(d) & 3) === 3) c++; return c; }
+    function skippedCount() { var c = 0; for (var d = 1; d <= 24; d++) if (resolved(d) && (bits(d) & 3) !== 3) c++; return c; }
+
+    function renderGrid() {
+      grid.textContent = "";
+      for (var d = 1; d <= 24; d++) {
+        (function (d) {
+          var locked = d > stat.open, isDone = (bits(d) & 3) === 3, isSkip = !isDone && resolved(d);
+          var b = el("button", "adv-door" + (locked ? " locked" : "") + (d === stat.today ? " today" : "") + (isDone ? " done" : "") + (isSkip ? " skip" : "") + (d === selected ? " sel" : ""));
+          b.type = "button";
+          b.appendChild(el("span", "adv-num", String(d)));
+          if (locked) b.appendChild(el("span", "adv-tag", "🔒"));
+          else if (isDone) b.appendChild(el("span", "adv-tag", "geschafft"));
+          else if (isSkip) b.appendChild(el("span", "adv-tag", "abgehakt"));
+          else if (d === stat.today) b.appendChild(el("span", "adv-tag", "heute"));
+          else b.appendChild(el("span", "adv-tag", "offen"));
+          b.setAttribute("aria-label", "Türchen " + d + ", " + (locked ? "noch geschlossen, öffnet sich am " + dayLabel(stat.y, d) : (isDone ? "geschafft" : isSkip ? "abgehakt, nicht alles geschafft" : "offen")));
+          b.addEventListener("click", function () {
+            if (locked) {
+              selected = 0;
+              detail.hidden = true;
+              msg.textContent = "Noch nicht! Türchen " + d + " öffnet sich am " + dayLabel(stat.y, d) + ".";
+              renderGrid();
+              return;
+            }
+            msg.textContent = "";
+            selected = d;
+            renderGrid();
+            renderDetail();
+          });
+          grid.appendChild(b);
+        })(d);
+      }
+    }
+
+    function navigate(t) {
+      var nav = window.AdventNav;
+      if (!nav) return;
+      if (t.g) nav.openGame(t.g); else nav.showTab(t.t);
+    }
+
+    function renderDetail() {
+      detail.textContent = "";
+      if (!selected) { detail.hidden = true; return; }
+      detail.hidden = false;
+      var d = selected, t = TASKS[d - 1];
+      detail.appendChild(el("h3", "", "Türchen " + d + " · " + dayLabel(stat.y, d)));
+
+      var a = el("div", "adv-task");
+      a.appendChild(el("p", "adv-kind", "🏃 Sport-Aufgabe"));
+      a.appendChild(el("p", "adv-text", t.s));
+      var ra = el("div", "adv-row");
+      ra.appendChild(choice(d, 1, 4, "Gemacht", "Nicht geschafft"));
+      a.appendChild(ra);
+      detail.appendChild(a);
+
+      var w = el("div", "adv-task");
+      w.appendChild(el("p", "adv-kind", "🎮 Aufgabe auf der Website"));
+      w.appendChild(el("p", "adv-text", t.w));
+      var rw = el("div", "adv-row");
+      var go = el("button", "adv-go", t.b);
+      go.type = "button";
+      go.addEventListener("click", function () { navigate(t); });
+      rw.appendChild(go);
+      rw.appendChild(choice(d, 2, 8, "Geschafft", "Nicht geschafft"));
+      w.appendChild(rw);
+      detail.appendChild(w);
+
+      if ((bits(d) & 3) === 3) {
+        detail.appendChild(el("p", "adv-ok", d === 24 ? "Frohe Weihnachten! Alle Aufgaben von Türchen 24 sind geschafft. 🎄" : "Türchen " + d + " ist geschafft. Die Qualle freut sich! ⭐"));
+      } else if (resolved(d)) {
+        detail.appendChild(el("p", "adv-ok", "Türchen " + d + " ist abgehakt. Nicht schlimm, beim nächsten Türchen klappt es wieder! 💙"));
+      }
+    }
+
+    // Zwei Kästchen pro Aufgabe: geschafft oder nicht geschafft (jeweils nur eins von beiden)
+    function choice(d, okBit, skipBit, okLabel, skipLabel) {
+      var wrap = document.createDocumentFragment();
+      [[okBit, okLabel, skipBit], [skipBit, skipLabel, okBit]].forEach(function (o) {
+        var l = el("label", "adv-chk"), c = document.createElement("input");
+        c.type = "checkbox";
+        c.checked = (bits(d) & o[0]) === o[0];
+        c.addEventListener("change", function () {
+          if (c.checked) setBit(d, o[2], false);
+          setBit(d, o[0], c.checked);
+          renderGrid();
+          renderDetail();
+          renderProgress();
+        });
+        l.appendChild(c);
+        l.appendChild(el("span", "", o[1]));
+        wrap.appendChild(l);
+      });
+      return wrap;
+    }
+
+    function renderProgress() {
+      var n = doneCount();
+      fill.style.width = Math.round((n / 24) * 100) + "%";
+      var k = skippedCount(), txt = n + " von 24 Türchen geschafft" + (k ? ", " + k + " abgehakt" : "");
+      if (stat.open === 0) txt = stat.daysToStart === 1 ? "Morgen geht es los: Am 1. Dezember öffnet sich das erste Türchen." : "Noch " + stat.daysToStart + " Tage bis zum 1. Dezember. Dann öffnet sich das erste Türchen.";
+      else if (n === 24 && !k) txt = "Alle 24 Türchen geschafft! Frohe Weihnachten! 🎄";
+      count.textContent = txt;
+    }
+
+    renderGrid();
+    renderDetail();
+    renderProgress();
+    if (stat.open === 0) msg.textContent = "Alle Türchen sind noch zu. Schau am 1. Dezember wieder vorbei.";
+
+    // Wenn um Mitternacht ein neuer Tag beginnt, öffnet sich das nächste Türchen von selbst
+    var timer = setInterval(function () {
+      if (!alive) return;
+      var s = status();
+      if (s.open !== stat.open || s.today !== stat.today || s.y !== stat.y) {
+        stat = s;
+        if (!selected && s.today) selected = s.today;
+        renderGrid(); renderDetail(); renderProgress();
+      }
+    }, 30000);
+
+    return function stop() { alive = false; clearInterval(timer); };
+  }
+
+  (window.Werkzeuge = window.Werkzeuge || []).push({
+    id: "advent",
+    name: "Advent",
+    start: start,
+    _engine: { status: status, TASKS: TASKS }
+  });
+})();
