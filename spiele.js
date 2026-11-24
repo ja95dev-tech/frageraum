@@ -7839,7 +7839,7 @@ var FigurenArt = (function () {
   var PY0 = TT - SIDE, PY1 = TB + SIDE;       // Laufbereich quer
   var PXMIN = -50;                            // so weit darfst du hinter die Platte zurück (der Gegner spiegelbildlich)
   var XMIN = -120, XMAX = W + 120, YMIN = PY0 - 60, YMAX = PY1 + 60;   // außerhalb davon ist der Ball im Aus
-  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte", CAM_KEY = "tischtennis-kamera", BALL_KEY = "tischtennis-ball";
+  var BEST_KEY = "tischtennis-best", LEVEL_KEY = "tischtennis-level", BLADE_KEY = "tischtennis-holz", RUBBER_KEY = "tischtennis-belag", LEN_KEY = "tischtennis-laenge", SOUND_KEY = "tischtennis-ton", TABLE_KEY = "tischtennis-platte", CAM_KEY = "tischtennis-kamera", FEEL_KEY = "tischtennis-gefuehl", BALL_KEY = "tischtennis-ball";
 
   var LEVELS = {
     leicht: { name: "Leicht", speed: 250, err: 60, slip: 0.25, react: 0.55, spin: 0.15 },
@@ -8157,12 +8157,16 @@ var FigurenArt = (function () {
     }
     var tableSel = TABLES[0];
     try { var st0 = localStorage.getItem(TABLE_KEY); TABLES.forEach(function (x) { if (x.id === st0) tableSel = x; }); } catch (e) {}
+    var feelSel = "real", FEEL = "real";
+    try { var fs0 = localStorage.getItem(FEEL_KEY); if (fs0 === "welt") feelSel = "welt"; } catch (e) {}
     var ballSel = BALLS[0];
     try { var sb0 = localStorage.getItem(BALL_KEY); BALLS.forEach(function (x) { if (x.id === sb0) ballSel = x; }); } catch (e) {}
-    var tableSelectEl = null, ballSelectEl = null;
+    var tableSelectEl = null, ballSelectEl = null, feelGroupEl = null;
     function applyTable() {
       TBL = online ? TABLES[0] : modeId === "tour" ? tour.table : tableSel;
       BALL = online ? BALLS[0] : ballSel;
+      FEEL = online ? "real" : feelSel;
+      if (feelGroupEl) { feelGroupEl.style.opacity = online ? "0.5" : ""; feelGroupEl.style.pointerEvents = online ? "none" : ""; }
       if (tableSelectEl) { tableSelectEl.disabled = online || modeId === "tour"; tableSelectEl.value = TBL.id; }
       if (ballSelectEl) { ballSelectEl.disabled = online; ballSelectEl.value = BALL.id; }
     }
@@ -8176,7 +8180,7 @@ var FigurenArt = (function () {
       gearInfo.textContent = "Holz " + blade.name + ": Tempo " + rate(blade.speed, 0.82, 1.17) + ", Kontrolle " + rate(blade.ctl, 0.8, 1.27) +
         ". Belag " + rubber.name + ": Spin " + rate(rubber.spin, 0.68, 1.27) + ", Tempo " + rate(rubber.speed, 0.86, 1.09) + ", Kontrolle " + rate(rubber.ctl, 0.88, 1.32) +
         ". Wie hart und mit wie viel Spin der Ball fliegt, hängt weiter von deinem Schlägertempo und der Bewegungsrichtung beim Treffen ab." +
-        " Der Ball bleibt beim Schlag etwa " + Math.round(dwellTime() * 1000) + " ms auf dem Schläger. In dieser Zeit wird deine Schlägerbewegung gemessen (Spin und Richtung)." +
+        (FEEL === "welt" ? " World-Tour-Stil: Der Schlag landet dort, wohin du den Schläger bewegst. Seitlich ziehen führt in die Ecken, schnell nach vorn schlägt ihn lang, zu hart ist aus." : "") + " Der Ball bleibt beim Schlag etwa " + Math.round(dwellTime() * 1000) + " ms auf dem Schläger. In dieser Zeit wird deine Schlägerbewegung gemessen (Spin und Richtung)." +
         (modeId === "tour" ? " Im Turnier bestimmt die Runde die Platte. " + TOUR[tour.round].name + " gegen Stufe " + LEVELS[levelId].name + "." : online ? " Online wird immer mit Standardplatte und Standardball gespielt." : " Platte: " + TBL.name + ", Ball: " + BALL.name + (TBL.mu < 0.12 ? ", der Drall greift kaum" : TBL.mu > 0.28 ? ", viel Grip, Spin wirkt stark" : "") + (TBL.rest > 0.93 ? ", der Ball springt hoch" : TBL.rest < 0.82 ? ", der Ball springt flach" : "") + ".");
     }
     gearBox.appendChild(gearSelect("tt-blade", "Holz", BLADES, blade, function (x) {
@@ -8331,6 +8335,12 @@ var FigurenArt = (function () {
     camGroup.mark(camMode);
     box.appendChild(lenGroup.el);
     box.appendChild(camGroup.el);
+    var feelGroup = chipGroup("Schlaggefühl", { real: "Realistisch", welt: "World-Tour-Stil" }, function (id) {
+      feelSel = id; feelGroup.mark(id); applyTable(); showGear();
+      try { localStorage.setItem(FEEL_KEY, id); } catch (e) {}
+    });
+    feelGroup.mark(feelSel); feelGroupEl = feelGroup.el;
+    box.appendChild(feelGroup.el);
     box.appendChild(gearBox);
     box.appendChild(gearInfo);
     box.appendChild(lobby);
@@ -8953,6 +8963,14 @@ var FigurenArt = (function () {
       loose *= 1 + tired;
       yt += loose * (Math.random() * 2 - 1);
       xt += loose * 0.55 * (Math.random() * 2 - 1);
+      if (FEEL === "welt") {
+        // World-Tour-Stil: Die Bewegung des Schlägers im Moment des Treffens legt den Landepunkt fest.
+        var lean = clamp(m.sx / 560, -0.3, 1.3), side = clamp(m.sy / 480, -1.3, 1.3);
+        xt = NETX + 36 + (TR - NETX - 36) * clamp(0.2 + 0.8 * lean * V, 0.08, 1.45) * (0.72 + 0.28 * q);   // zu viel Tempo trägt hinter die Platte
+        yt = MIDY + side * (TB - TT) * 0.5 * 1.05 + clamp(ct.ry / PREACH, -1, 1) * 26;                      // seitlich ziehen: in die Ecken, zu weit: aus
+        loose = (1 - q) * 40 / GEAR.ctl * (1 + tired);
+        yt += loose * (Math.random() * 2 - 1); xt += loose * 0.4 * (Math.random() * 2 - 1);
+      }
       var spin = computeSpin(m, ct), sp = spin.sp, sd = spin.sd;   // Spin aus Schlägertempo, Richtung und Treffhöhe
       sp = clamp(sp - 0.25 * clamp(b.sp, -1.3, 1.3) * GEAR.grip * (1 - GEAR.absorb), -1.6, 1.6);   // ankommender Spin wirkt zurück
       sd = clamp(sd - 0.12 * clamp(b.sd, -1.3, 1.3) * (1 - GEAR.absorb), -1.6, 1.6);
