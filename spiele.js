@@ -1120,7 +1120,19 @@
     { icon: "🪬", name: "Amulett des Riffs", bonus: 0.40 },
     { icon: "🧜", name: "Schuppe der Meerjungfrau", bonus: 0.50 },
     { icon: "🐚", name: "Stimme des Meeres", bonus: 0.75 },
-    { icon: "👑", name: "Krone des Meereskönigs", bonus: 1.00 }
+    { icon: "👑", name: "Krone des Meereskönigs", bonus: 1.00 },
+    { icon: "🔔", name: "Versunkene Glocke", bonus: 0.60 },
+    { icon: "🪙", name: "Piratenschatz", bonus: 0.80 },
+    { icon: "⚔️", name: "Schwert des Tiefseekönigs", bonus: 1.00 },
+    { icon: "🛡️", name: "Schild der Strömung", bonus: 1.25 },
+    { icon: "🏛️", name: "Säule von Atlantis", bonus: 1.50 },
+    { icon: "📿", name: "Perlenkette der Meerhexe", bonus: 2.00 },
+    { icon: "🕯️", name: "Ewige Laterne", bonus: 2.50 },
+    { icon: "🦪", name: "Riesenperle", bonus: 3.00 },
+    { icon: "🪞", name: "Spiegel der Tiefe", bonus: 4.00 },
+    { icon: "🔮", name: "Orakelkugel", bonus: 5.00 },
+    { icon: "🌟", name: "Sternenscherbe", bonus: 6.00 },
+    { icon: "🐉", name: "Zahn des Leviathans", bonus: 8.00 }
   ];
   function artCount(s) { return s.artifacts.reduce(function (a, b) { return a + (b ? 1 : 0); }, 0); }
   function artFactor(s) {
@@ -1399,6 +1411,9 @@
   addAch("Ewiges Riff erreicht", "Die Galaxie Das Ewige Riff besiedelt", function (s) { return galaxyDone(s, 14); });
   [[600, "Riesenflotte"], [1000, "Tausend Fabriken"]].forEach(function (e) {
     addAch(e[1], e[0] + " Fabriken gleichzeitig", function (s) { return buildingCount(s) >= e[0]; });
+  });
+  [[12, "Schatzjäger"], [18, "Artefakt-Meister"]].forEach(function (e) {
+    addAch(e[1], e[0] + " Artefakte gefunden", function (s) { return artCount(s) >= e[0]; });
   });
   addAch("Fabrik-Gigant", "500 Stück einer Fabrik", function (s) { return s.owned.some(function (n) { return n >= 500; }); });
   [[1e34, "10 Qid.", "Perlen-Ozean"], [1e37, "10 Sext.", "Perlen-Kosmos"], [1e40, "10 Sxd.", "Perlen-Ewigkeit"]].forEach(function (e) {
