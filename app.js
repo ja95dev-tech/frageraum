@@ -1,6 +1,6 @@
 /* © 2026 BlaueQualle. Alle Rechte vorbehalten. Kopieren, Verändern und Weitergeben nur mit schriftlicher Erlaubnis. */
 
-// DEMO_MODUS = true: Die Seite läuft ohne Server (Passwort:////), nur zum Ansehen des Designs.
+// DEMO_MODUS = true: Die Seite läuft ohne Server (Passwort: demo), nur zum Ansehen des Designs.
   var DEMO_MODUS = false;
 
 (function () {
@@ -667,6 +667,11 @@
         for (var i = 0; i < localStorage.length; i++) if (/^rennstrecke:\d+$/.test(localStorage.key(i))) n++;
       } catch (e) {}
       return n ? "Bestzeiten auf " + n + (n === 1 ? " Strecke" : " Strecken") : "Noch keine Bestzeit";
+    } },
+    { id: "quallenliga", icon: "⚽", name: "Quallen-Liga", desc: "Auto-Fußball unter Wasser mit Boost und Sprüngen, gegen den Computer oder zu zweit", stat: function () {
+      var st = jsonOf("liga-stat");
+      if (!st || !num(st.played)) return "Noch nicht gespielt";
+      return fmtInt(num(st.won)) + " Siege aus " + fmtInt(num(st.played)) + " Spielen";
     } },
     { id: "flaggenraten", icon: "🚩", name: "Flaggenraten", desc: "Länder an ihrer Flagge erkennen", stat: function () {
       var best = 0;
