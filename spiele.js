@@ -4627,15 +4627,15 @@
   "use strict";
 
   // ---------- Maße (Einheit: Pixel, y zeigt nach unten, 0 = Decke, AH = Boden) ----------
-  var AW = 1400, AH = 370;                  // Spielfeld: Breite und Höhe
-  var GD = 48, GH = 130, GY = AH - GH;     // Tor: Tiefe, Höhe und y der Latte
-  var CH = 56;                             // abgeschrägte Ecken oben
-  var BR = 22;                             // Radius der Perle
-  var HW = 26, HH = 13;                    // halbe Breite und Höhe des Autos
+  var AW = 1600, AH = 400;                  // Spielfeld: Breite und Höhe
+  var GD = 56, GH = 165, GY = AH - GH;     // Tor: Tiefe, Höhe und y der Latte
+  var CH = 70;                             // abgeschrägte Ecken oben
+  var BR = 30;                             // Radius der Perle
+  var HW = 34, HH = 17;                    // halbe Breite und Höhe des Autos
   var DT = 1 / 120;                        // feste Schrittweite der Physik
-  var G_CAR = 1250, G_BALL = 820;
-  var MAXG = 350, MAXV = 680, BALL_MAX = 900;
-  var JUMP_V = 470, JUMP2_V = 400, DODGE_V = 280, FLIP_T = 0.5;
+  var G_CAR = 1250, G_BALL = 640;
+  var MAXG = 370, MAXV = 700, BALL_MAX = 960;
+  var JUMP_V = 520, JUMP2_V = 440, DODGE_V = 300, FLIP_T = 0.5;
   var BOOST_ACC = 1100, BOOST_USE = 33.3, BOOST_START = 34;
   var KICKOFF = 3, GOAL_T = 2.8, OT_MAX = 120;
   var TAU = Math.PI * 2;
@@ -4687,7 +4687,7 @@
         b.y += ny * (BR - d);
         var vn = b.vx * nx + b.vy * ny;
         if (vn < 0) {
-          var e = -vn < 70 ? 0 : 0.62;
+          var e = -vn < 40 ? 0 : (ny < -0.9 ? 0.86 : 0.66);   // Boden springt stark (für Air-Dribbles), Wände weniger
           b.vx -= (1 + e) * vn * nx;
           b.vy -= (1 + e) * vn * ny;
           var tx = -ny, ty = nx, vt = b.vx * tx + b.vy * ty;
@@ -4703,7 +4703,7 @@
 
   function ballFree(b, dt) {
     b.vy += G_BALL * dt;
-    var k = Math.exp(-0.14 * dt);
+    var k = Math.exp(-0.06 * dt);
     b.vx *= k; b.vy *= k;
     var sp = Math.hypot(b.vx, b.vy);
     if (sp > BALL_MAX) { b.vx *= BALL_MAX / sp; b.vy *= BALL_MAX / sp; }
@@ -4860,12 +4860,16 @@
     var vn = (b.vx - vcx) * ct.nx + (b.vy - vcy) * ct.ny;
     b.last = c.team;
     if (vn < 0) {
-      var e = -vn < 60 ? 0 : 0.55, j = -(1 + e) * vn;
+      var e = -vn < 40 ? 0 : 0.62, j = -(1 + e) * vn;
       b.vx += ct.nx * j;
       b.vy += ct.ny * j;
+      // Reibung: die Perle wird auf dem Dach ein Stück mitgenommen (so kann man sie tragen und dribbeln)
+      var tx = -ct.ny, ty = ct.nx, vrt = (b.vx - vcx) * tx + (b.vy - vcy) * ty;
+      var jt = clamp(-vrt * 0.5, -0.4 * Math.abs(j), 0.4 * Math.abs(j));
+      b.vx += tx * jt; b.vy += ty * jt;
       c.vx -= ct.nx * j * 0.06;
       c.vy -= ct.ny * j * 0.06;
-      if (-vn > 130) w.ev.push({ k: "hit", s: -vn, x: b.x - ct.nx * BR, y: b.y - ct.ny * BR, team: c.team });
+      if (-vn > 150) w.ev.push({ k: "hit", s: -vn, x: b.x - ct.nx * BR, y: b.y - ct.ny * BR, team: c.team });
     }
     var sp = Math.hypot(b.vx, b.vy);
     if (sp > BALL_MAX) { b.vx *= BALL_MAX / sp; b.vy *= BALL_MAX / sp; }
@@ -4880,7 +4884,7 @@
       pads: [], score: [0, 0], timeLeft: opts.seconds || 180, ot: false, otLeft: OT_MAX,
       winner: -2, scorer: -1, ev: [], rnd: opts.rnd || Math.random
     };
-    [[AW * 0.2, 0], [AW * 0.35, 0], [AW * 0.5, 0], [AW * 0.65, 0], [AW * 0.8, 0], [52, 1], [AW - 52, 1]].forEach(function (p) {
+    [[AW * 0.2, 0], [AW * 0.35, 0], [AW * 0.5, 0], [AW * 0.65, 0], [AW * 0.8, 0], [64, 1], [AW - 64, 1]].forEach(function (p) {
       w.pads.push({ x: p[0], big: !!p[1], cd: 0 });
     });
     kickoff(w);
@@ -4895,7 +4899,7 @@
       var fresh = newCar(i);
       Object.keys(fresh).forEach(function (k) { c[k] = fresh[k]; });
       c.ai = ai;
-      c.x = i === 0 ? AW / 2 - 400 : AW / 2 + 400;
+      c.x = i === 0 ? AW / 2 - 450 : AW / 2 + 450;
     }
     for (var p = 0; p < w.pads.length; p++) w.pads[p].cd = 0;
     w.phase = "countdown";
@@ -4939,8 +4943,8 @@
 
     // Autos stoßen sich gegenseitig an
     var a = w.cars[0], d = w.cars[1], ddx = d.x - a.x, ddy = d.y - a.y;
-    if (Math.abs(ddy) < 24 && Math.abs(ddx) < 50) {
-      var s = ddx > 0 ? 1 : ddx < 0 ? -1 : 1, ov = 50 - Math.abs(ddx), rv = (a.vx - d.vx) * s;
+    if (Math.abs(ddy) < 2 * HH && Math.abs(ddx) < 2 * HW) {
+      var s = ddx > 0 ? 1 : ddx < 0 ? -1 : 1, ov = 2 * HW - Math.abs(ddx), rv = (a.vx - d.vx) * s;
       a.x = clamp(a.x - s * ov / 2, HW, AW - HW);
       d.x = clamp(d.x + s * ov / 2, HW, AW - HW);
       if (rv > 0) { a.vx -= s * rv * 0.65; d.vx += s * rv * 0.65; }
@@ -4955,7 +4959,7 @@
     var deep = null;
     for (i = 0; i < 2; i++) {
       var ct = contact(w.cars[i], b);
-      if (ct && ct.depth > 5) deep = ct;
+      if (ct && ct.depth > 7) deep = ct;
     }
     if (deep) {
       b.sq += dt;
@@ -4984,7 +4988,7 @@
       if (pad.cd > 0) { pad.cd -= dt; continue; }
       for (i = 0; i < 2; i++) {
         c = w.cars[i];
-        if (Math.abs(c.x - pad.x) < (pad.big ? 36 : 28) && c.y > AH - 48 && c.boost < 100) {
+        if (Math.abs(c.x - pad.x) < (pad.big ? 44 : 34) && c.y > AH - 62 && c.boost < 100) {
           c.boost = Math.min(100, c.boost + (pad.big ? 100 : 14));
           pad.cd = pad.big ? 8 : 4;
           w.ev.push({ k: "pad", x: pad.x, big: pad.big, team: c.team });
@@ -5027,11 +5031,13 @@
   }
 
   // ---------- Computergegner ----------
+  // aerial: Können in der Luft, flip: Lust auf Flip-Schüsse. Jede KI bekommt zusätzlich eine zufällige Spielweise.
   var AILV = {
-    leicht: { react: 0.30, vmax: 0.78, boost: 0.25, jump: 0.45, err: 70, aerial: false },
-    mittel: { react: 0.16, vmax: 0.92, boost: 0.65, jump: 0.80, err: 35, aerial: false },
-    schwer: { react: 0.07, vmax: 1.00, boost: 1.00, jump: 1.00, err: 10, aerial: true }
+    leicht: { react: 0.28, vmax: 0.80, boost: 0.30, jump: 0.50, err: 80, aerial: 0.1, flip: 0.30 },
+    mittel: { react: 0.15, vmax: 0.93, boost: 0.70, jump: 0.80, err: 40, aerial: 0.5, flip: 0.60 },
+    schwer: { react: 0.07, vmax: 1.00, boost: 1.00, jump: 1.00, err: 12, aerial: 1.0, flip: 0.90 }
   };
+  var REACH = HW + BR;                      // Abstand der Mittelpunkte bei Berührung (auf Bodenhöhe)
 
   // Flugbahn der Perle für die nächsten Sekunden (ohne Autos): Liste von Zuständen im Abstand sp
   function predict(b0, n, sp) {
@@ -5045,104 +5051,163 @@
   }
 
   function newAI() {
-    return { t: 0, tx: AW / 2, mode: "attack", noise: 0, jcd: 0, boostWish: false, canJump: true, stuck: 0,
+    return { t: 0, tx: AW / 2, mode: "attack", shot: "drive", shotT: 0, holdT: 0, noise: 0, jcd: 0, boostWish: false,
+      canJump: true, aim: false, stuck: 0, carry: 0, brakeT: 0, carryMax: 0.8, flick: false, pers: null,
       inp: { left: false, right: false, jump: false, boost: false } };
+  }
+
+  function nearestPad(w, c) {
+    var best = null;
+    w.pads.forEach(function (pd) {
+      if (pd.cd < 1.5 && (!best || Math.abs(pd.x - c.x) < Math.abs(best.x - c.x))) best = pd;
+    });
+    return best;
   }
 
   function aiThink(w, c, lv) {
     var a = c.ai, b = w.ball, ad = c.team === 0 ? 1 : -1, ownX = c.team === 0 ? 0 : AW, rnd = w.rnd, k;
+    if (!a.pers) a.pers = { flashy: rnd(), patient: rnd(), bold: rnd() };
+    var P = a.pers;
     var pred = predict(b, 20, 0.1);
     var vcap = MAXG * lv.vmax;
-    if (c.boost > 25 && lv.boost > 0.3) vcap = 480;
+    if (c.boost > 25 && lv.boost > 0.3) vcap = 500;
+    var canAir = lv.aerial > 0.4 && c.boost > 30;
     var pick = null;
     for (k = 0; k < pred.length; k++) {
       var p = pred[k], hr = AH - p.y;
-      var okH = hr < 150 || (lv.aerial && c.boost > 30 && hr < 250);
+      var okH = hr < 210 || (canAir && hr < 340);
       if (okH && Math.abs(p.x - c.x) / vcap <= k * 0.1 + 0.2) { pick = p; break; }
     }
     if (!pick) pick = pred[6];
     a.noise = (rnd() - 0.5) * 2 * lv.err;
     a.canJump = rnd() < lv.jump;
+    a.aim = rnd() < lv.aerial;
+    if (a.shotT <= 0) {                                   // Schussart wechseln: Fahren, Flip oder Sprung
+      var r = rnd(), fl = lv.flip * P.flashy;
+      a.shot = r < fl * 0.75 ? "flip" : r < fl * 0.75 + 0.28 ? "pop" : "drive";
+      a.shotT = 1 + 2.5 * rnd();
+    }
     var behindNow = ad * (b.x - c.x) > 20;
-    if (behindNow) {
+    var hr0 = AH - pick.y;
+    var deepOpp = ad * (b.x - AW / 2) > AW * 0.22;
+    if (!behindNow) {
+      a.mode = "rotate";                                  // auf der falschen Seite: erst hinter die Perle kommen
+      a.tx = (-ad * b.vx > 60 || Math.abs(b.x - ownX) < 350) ? ownX + ad * 60 : b.x - ad * 300;
+    } else if (a.holdT > 0 && a.mode === "shadow") {
+      a.tx = b.x - ad * (420 + P.bold * 200);             // abwartend dranbleiben
+    } else if (deepOpp && P.patient > 0.5 && rnd() < 0.3 && lv.vmax < 0.99 + 0.02) {
+      a.mode = "shadow"; a.holdT = 1.2 + 2.5 * rnd();
+      a.tx = b.x - ad * (420 + P.bold * 200);
+    } else if (hr0 > 120 && pick.vy > -80) {
+      a.mode = "air";                                     // Luftball: unter die Landestelle stellen
+      a.tx = pick.x - ad * 25 + a.noise * 0.4;
+    } else {
       a.mode = "attack";
       a.tx = (ad * (pick.x - c.x) > 0 ? pick.x : b.x) + ad * 40 + a.noise;
-    } else {
-      a.mode = "rotate";                                  // auf der falschen Seite: erst hinter die Perle kommen
-      a.tx = (-ad * b.vx > 60 || Math.abs(b.x - ownX) < 300) ? ownX + ad * 45 : b.x - ad * 230;   // Tor decken oder hinter die Perle
     }
-    if (c.boost < 20 && (a.mode !== "attack" || Math.abs(pick.x - c.x) > 320) && Math.abs(b.x - c.x) > 300) {
-      var best = null;
-      w.pads.forEach(function (pd) {
-        if (pd.cd < 1.5 && (!best || Math.abs(pd.x - c.x) < Math.abs(best.x - c.x))) best = pd;
-      });
-      if (best) { a.mode = "pad"; a.tx = best.x; }
+    if (c.boost < (a.mode === "shadow" ? 70 : 20) && (a.mode !== "attack" || Math.abs(pick.x - c.x) > 360) && Math.abs(b.x - c.x) > 300) {
+      var best = nearestPad(w, c);
+      if (best) { a.mode = a.mode === "shadow" ? "shadow" : "pad"; a.tx = best.x; }
     }
     a.tx = clamp(a.tx, HW, AW - HW);
     var dxt = a.tx - c.x;
-    a.boostWish = c.boost > 10 && rnd() < lv.boost &&
-      (Math.abs(dxt) > 260 || (a.mode === "attack" && Math.abs(pick.x - c.x) < 260 && AH - pick.y < 120));
+    a.boostWish = c.boost > 10 && a.mode !== "shadow" && rnd() < lv.boost &&
+      (Math.abs(dxt) > 300 || (a.mode === "attack" && Math.abs(pick.x - c.x) < 300 && AH - pick.y < 140));
+    a.carryMax = 0.45 + P.patient * 0.9;
   }
 
   function aiInput(w, c, level) {
     var lv = AILV[level] || AILV.mittel, a = c.ai || (c.ai = newAI()), b = w.ball, ad = c.team === 0 ? 1 : -1;
     var inp = a.inp;
     inp.left = inp.right = inp.jump = inp.boost = false;
-    if (w.phase !== "play") return inp;
+    if (w.phase !== "play") { a.carry = 0; a.flick = false; a.brakeT = 0; return inp; }
     a.t -= DT;
     if (a.t <= 0) { aiThink(w, c, lv); a.t = lv.react * (0.8 + 0.4 * w.rnd()); }
     if (a.jcd > 0) a.jcd -= DT;
+    if (a.shotT > 0) a.shotT -= DT;
+    if (a.holdT > 0) a.holdT -= DT;
     var bdx = b.x - c.x, bdy = b.y - c.y, dxt = a.tx - c.x, hr = -bdy;
+    var sgn = bdx >= 0 ? 1 : -1;
+    var closing = (c.vx - b.vx) * sgn, tc = (Math.abs(bdx) - REACH) / Math.max(closing, 1);
+    var lowBall = Math.abs(bdy) < 55;
 
     if (c.grounded) {
       var cap = MAXG * lv.vmax;
-      if (dxt > 10 && c.vx < cap) inp.right = true;
-      else if (dxt < -10 && c.vx > -cap) inp.left = true;
-      if (Math.abs(dxt) < 24 && Math.abs(c.vx) > 120 && c.vx * dxt > 0) { inp.right = c.vx < 0; inp.left = c.vx > 0; }
-      if (a.mode === "rotate" && Math.abs(bdx) < 100 && Math.abs(bdy) < 60 && c.vx * bdx > 0 && a.jcd > 0) {
-        inp.left = c.vx > 0; inp.right = c.vx < 0;       // Sprung nicht möglich: lieber bremsen als die Perle ins eigene Tor schieben
-      }
-      if (a.boostWish && (inp.left || inp.right) && Math.abs(dxt) > 60) inp.boost = true;
-      var near = Math.abs(bdx) < 115 + Math.abs(c.vx) * 0.22;
-      if (a.jcd <= 0) {
-        if (a.mode === "attack" && a.canJump && near && hr > 30 && ad * bdx > -10) { inp.jump = true; a.jcd = 0.6; }
-        else if (a.mode !== "attack" && Math.abs(bdy) < 70) {
-          // Auf der falschen Seite: rechtzeitig über die Perle springen (Zeit bis zur Berührung schätzen)
-          var closing = (c.vx - b.vx) * (bdx >= 0 ? 1 : -1), tc = (Math.abs(bdx) - 50) / Math.max(closing, 1);
-          if (closing > 50 && tc < 0.4) { inp.jump = true; a.jcd = 0.5; }
+      // Perle liegt auf dem Dach: mitfahren (Dribbeln), dann abspringen und die Perle mit einem Flip wegschießen
+      var onRoof = bdy < -(HH + BR - 8) && bdy > -(HH + BR + 70) && Math.abs(bdx) < 50 && Math.abs(b.vy) < 320;
+      if (onRoof && lv.flip > 0.3 && ad * (b.x - ownXOf(c)) > 0) a.carry += DT; else a.carry = Math.max(0, a.carry - 2 * DT);
+      if (a.brakeT > 0) {                                  // Abschlag durch Bremsen: die Perle rollt vorn vom Dach
+        a.brakeT -= DT;
+        inp.left = c.vx > 30; inp.right = c.vx < -30;
+        if (a.brakeT <= 0) a.jcd = 0.3;
+      } else if (a.carry > 0.05) {
+        var want = b.vx + ad * 40;
+        inp.right = want > c.vx + 15; inp.left = want < c.vx - 15;
+        if (a.carry > a.carryMax && a.jcd <= 0) {
+          a.carry = 0;
+          if (a.pers && a.pers.flashy > 0.55) { inp.jump = true; a.flick = true; a.jcd = 0.6; }   // verspielt: hochspringen und flippen
+          else a.brakeT = 0.3;
         }
+      } else {
+        if (dxt > 10 && c.vx < cap) inp.right = true;
+        else if (dxt < -10 && c.vx > -cap) inp.left = true;
+        if (Math.abs(dxt) < 24 && Math.abs(c.vx) > 120 && c.vx * dxt > 0) { inp.right = c.vx < 0; inp.left = c.vx > 0; }
+        if (a.mode === "rotate" && Math.abs(bdx) < 110 && Math.abs(bdy) < 70 && c.vx * bdx > 0 && a.jcd > 0) {
+          inp.left = c.vx > 0; inp.right = c.vx < 0;     // Sprung nicht möglich: lieber bremsen als die Perle ins eigene Tor schieben
+        }
+        if (a.boostWish && (inp.left || inp.right) && Math.abs(dxt) > 70) inp.boost = true;
+        if (a.jcd <= 0) {
+          if (a.mode === "attack" || a.mode === "air") {
+            var front = ad * bdx > -10;
+            var catchIt = a.pers && a.pers.patient > 0.45 && lv.flip > 0.3 && b.vy > 0 && Math.abs(bdx) < 70 && hr < HH + BR + 120;   // fallende Perle auf dem Dach auffangen
+            if (a.canJump && front && hr > 45 && !catchIt && Math.abs(bdx) < 130 + Math.abs(c.vx) * 0.25 && (a.mode === "air" || hr > 60)) { inp.jump = true; a.jcd = 0.6; }
+            else if (a.canJump && front && lowBall && closing > 40) {
+              if (a.shot === "flip" && tc < 0.32 && tc > 0) { inp.jump = true; a.jcd = 0.6; }
+              else if (a.shot === "pop" && tc < 0.16 && tc > 0) { inp.jump = true; a.jcd = 0.6; }
+            }
+          } else if (a.mode === "rotate" && Math.abs(bdy) < 80) {
+            if (closing > 50 && tc < 0.4) { inp.jump = true; a.jcd = 0.5; }   // auf der falschen Seite: über die Perle springen
+          }
+        }
+        if (Math.abs(c.vx) < 6 && Math.abs(dxt) > 60) {
+          a.stuck += DT;
+          if (a.stuck > 0.8) { inp.jump = true; a.stuck = 0; }
+        } else a.stuck = 0;
       }
-      if (Math.abs(c.vx) < 6 && Math.abs(dxt) > 60) {
-        a.stuck += DT;
-        if (a.stuck > 0.8) { inp.jump = true; a.stuck = 0; }
-      } else a.stuck = 0;
     } else {
       var flip = false;
-      if (c.jumps > 0 && c.jt > 0.1 && c.flipT === 0) {
-        if (a.mode === "attack" && a.canJump && Math.abs(bdx) < 100 && Math.abs(bdy) < 90) {
+      if (c.jumps > 0 && c.jt > 0.08 && c.flipT === 0) {
+        if (a.flick && Math.abs(bdx) < 150) {            // Abschlag nach dem Dribbeln: Flip in Angriffsrichtung
+          inp.jump = true; inp.right = ad > 0; inp.left = ad < 0; flip = true; a.flick = false;
+        } else if (a.mode === "attack" && a.canJump && a.shot === "flip" && Math.abs(bdx) < 140 && Math.abs(bdy) < 110) {
           inp.jump = true; inp.right = ad > 0; inp.left = ad < 0; flip = true;
-        } else if (lv.aerial && hr > 90 && Math.abs(bdx) < 70) { inp.jump = true; flip = true; }
+        } else if (a.mode === "air" && a.canJump && Math.abs(bdx) < 100 && Math.abs(bdy) < 120) {
+          if (lv.aerial > 0.4 && hr > 70) { inp.jump = true; flip = true; }                          // Doppelsprung nach oben
+          else { inp.jump = true; inp.right = ad > 0; inp.left = ad < 0; flip = true; }
+        }
       }
-      var want = 0, aim = false;
-      if (lv.aerial && c.boost > 20 && a.mode === "attack" && hr > 70 && Math.abs(bdx) < 300) {
+      if (c.grounded === false && c.jt > 0.9) a.flick = false;
+      var want2 = 0, aim = false;
+      if (a.aim && c.boost > 20 && (a.mode === "attack" || a.mode === "air") && hr > 70 && Math.abs(bdx) < 380) {
         var th = Math.atan2(bdy, bdx);
-        want = c.f === 1 ? th : normAng(th + Math.PI);
+        want2 = c.f === 1 ? th : normAng(th + Math.PI);
         aim = true;
       }
       if (!flip && c.flipT === 0) {
-        var err = normAng(want - c.ang);
+        var err = normAng(want2 - c.ang);
         inp.right = err > 0.15;
         inp.left = err < -0.15;
       }
-      if (aim && Math.abs(normAng(want - c.ang)) < 0.35) inp.boost = true;
+      if (aim && Math.abs(normAng(want2 - c.ang)) < 0.35) inp.boost = true;
     }
     return inp;
   }
+  function ownXOf(c) { return c.team === 0 ? 0 : AW; }
 
   // ======================================================================
   // Oberfläche
   // ======================================================================
-  var VW = 960, VH = 480, OY = 56;                  // Bildgröße und Höhe der Decke im Bild
+  var VW = 960, VH = 520, OY = 56;                  // Bildgröße und Höhe der Decke im Bild
   var TEAM1 = [255, 122, 89];
   var K_LEVEL = "liga-level", K_MODE = "liga-modus", K_DUR = "liga-dauer", K_SOUND = "liga-ton", K_STAT = "liga-stat", K_BEST = "liga-best";
   var P_SOLO = { left: ["KeyA", "ArrowLeft"], right: ["KeyD", "ArrowRight"], jump: ["Space", "KeyW", "ArrowUp"], boost: ["KeyS", "ArrowDown", "ShiftLeft", "ShiftRight", "KeyE"] };
@@ -5558,7 +5623,7 @@
       var sg = ctx.createLinearGradient(0, AH, 0, AH + 70);
       sg.addColorStop(0, "#b9a873"); sg.addColorStop(1, "#6f6340");
       ctx.fillStyle = sg;
-      ctx.fillRect(-GD - 200, AH, AW + 2 * GD + 400, 120);
+      ctx.fillRect(-GD - 200, AH, AW + 2 * GD + 400, 140);
       for (i = Math.floor((cam - 40) / 90); i < (cam + VW + 40) / 90; i++) {
         var h = hash(i), cx = i * 90 + h * 60, kind = Math.floor(h * 3);
         if (kind === 0) { ctx.strokeStyle = "rgba(255,120,150,0.85)"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(cx, AH + 30); ctx.lineTo(cx, AH + 12); ctx.moveTo(cx, AH + 20); ctx.lineTo(cx - 6, AH + 13); ctx.moveTo(cx, AH + 18); ctx.lineTo(cx + 6, AH + 11); ctx.stroke(); }
@@ -5594,7 +5659,7 @@
       ctx.strokeStyle = rgba(colB, 0.95); ctx.beginPath(); ctx.moveTo(AW, GY); ctx.lineTo(AW + GD, GY); ctx.stroke();
       // Boost-Muscheln
       world.pads.forEach(function (p) {
-        var r = p.big ? 17 : 11, ready = p.cd <= 0, a = ready ? 1 : 0.25;
+        var r = p.big ? 22 : 14, ready = p.cd <= 0, a = ready ? 1 : 0.25;
         if (ready) {
           var gg = ctx.createRadialGradient(p.x, AH, 1, p.x, AH, r * 2.2);
           gg.addColorStop(0, p.big ? "rgba(255,220,120,0.55)" : "rgba(120,240,255,0.5)"); gg.addColorStop(1, "rgba(120,240,255,0)");
@@ -5617,19 +5682,25 @@
       var glow = ctx.createRadialGradient(b.x, b.y, BR * 0.5, b.x, b.y, BR * 2.1);
       glow.addColorStop(0, "rgba(255,240,250," + (0.35 + Math.min(0.3, sp / 2500)).toFixed(2) + ")"); glow.addColorStop(1, "rgba(255,240,250,0)");
       ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(b.x, b.y, BR * 2.1, 0, TAU); ctx.fill();
-      var g = ctx.createRadialGradient(b.x - 7, b.y - 8, 2, b.x, b.y, BR);
-      g.addColorStop(0, "#ffffff"); g.addColorStop(0.45, "#f7e6f1"); g.addColorStop(0.8, "#c3e4ee"); g.addColorStop(1, "#8fb4dc");
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, BR, 0, TAU); ctx.fill();
       ctx.save();
-      ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+      ctx.translate(b.x, b.y);
+      var kb = BR / 22;
+      ctx.scale(kb, kb);
+      var R = 22;
+      var g = ctx.createRadialGradient(-7, -8, 2, 0, 0, R);
+      g.addColorStop(0, "#ffffff"); g.addColorStop(0.45, "#f7e6f1"); g.addColorStop(0.8, "#c3e4ee"); g.addColorStop(1, "#8fb4dc");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+      ctx.save();
+      ctx.rotate(b.rot);
       ctx.strokeStyle = "rgba(140,170,215,0.55)"; ctx.lineWidth = 1.5;
-      for (var k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(0, BR * 0.55, BR * (0.5 + k * 0.17), Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
-      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.beginPath(); ctx.arc(-BR * 0.3, -BR * 0.45, 2.2, 0, TAU); ctx.arc(BR * 0.45, -BR * 0.1, 1.6, 0, TAU); ctx.fill();
+      for (var k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(0, R * 0.55, R * (0.5 + k * 0.17), Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
+      ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.beginPath(); ctx.arc(-R * 0.3, -R * 0.45, 2.2, 0, TAU); ctx.arc(R * 0.45, -R * 0.1, 1.6, 0, TAU); ctx.fill();
       ctx.restore();
       ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.beginPath(); ctx.ellipse(b.x - 7, b.y - 9, 5, 3, -0.6, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(-7, -9, 5, 3, -0.6, 0, TAU); ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(b.x, b.y, BR, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.stroke();
+      ctx.restore();
     }
 
     function drawCar(c, col, label, t) {
@@ -5637,7 +5708,8 @@
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.rotate(c.ang);
-      ctx.scale(c.f, 1);
+      var ks = HW / 26;
+      ctx.scale(c.f * ks, ks);
       // Fangarme hinten
       ctx.lineCap = "round"; ctx.lineWidth = 2;
       var trailLen = 18 + Math.min(Math.abs(c.vx) / 22, 16);
@@ -5678,7 +5750,7 @@
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = "bold 12px system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(label, c.x, Math.max(14, c.y - 30));
+      ctx.fillText(label, c.x, Math.max(14, c.y - 44));
     }
 
     function drawParts() {
