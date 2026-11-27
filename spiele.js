@@ -2982,17 +2982,17 @@
 (function () {
   "use strict";
 
-  var WW = 3200, WH = 2400;   // Größe der Welt
+  var WW = 4160, WH = 3120;   // Größe der Welt
   var VW = 480, VH = 360;     // Bildgröße der 3D-Ansicht
-  var ROAD = 76;              // Straßenbreite
+  var ROAD = 104;             // Straßenbreite
   var SP = 10;                // Abstand der Streckenpunkte
   var LAPS = 3;
   var HILL = 42;              // Höhe der Hügel
   var SEABED = 18;            // so tief liegt der Meeresboden unter der Straße
   var PIT = 90;               // so tief sind die Löcher
   var GRAV = 520;             // Schwerkraft für Sprünge
-  var EDGE = ROAD / 2 + 8;    // Straße samt Randstreifen (hier ist noch "auf der Strecke")
-  var BANK = 18;              // so breit ist die Böschung vom Randstreifen hinunter zum Meeresboden
+  var EDGE = ROAD / 2 + 10;   // Straße samt Randstreifen (hier ist noch "auf der Strecke")
+  var BANK = 24;              // so breit ist die Böschung vom Randstreifen hinunter zum Meeresboden
   var TAU = Math.PI * 2;
 
   // ---------- Streckenerzeugung ----------
@@ -3050,14 +3050,14 @@
     // Unterwasser-Pflanzen und Felsen neben der Strecke (nur Dekoration)
     // t: 0 Tang, 1 Koralle, 2 Fels, 3 Röhrenkoralle
     var props = [];
-    for (i = 0; i < 1100 && props.length < 230; i++) {
+    for (i = 0; i < 1600 && props.length < 270; i++) {
       var bx = rnd() * WW, by = rnd() * WH, kind = rnd(), rr = rnd(), pang = rnd() * TAU, bd = 1e18, bi = 0;
       for (j = 0; j < n; j += 2) {
         var ex = bx - pts[j].x, ey = by - pts[j].y, e2 = ex * ex + ey * ey;
         if (e2 < bd) { bd = e2; bi = j; }
       }
       bd = Math.sqrt(bd);
-      if (bd < ROAD * 0.95 || bd > 230) continue;
+      if (bd < ROAD * 0.95 || bd > 290) continue;
       props.push({ x: bx, y: by, r: 0.8 + rr * 0.9, t: kind < 0.3 ? 0 : kind < 0.58 ? 1 : kind < 0.8 ? 2 : 3, a: pang, bi: bi, v: Math.floor(rr * 997) % 4 });
     }
 
@@ -3080,17 +3080,25 @@
     for (i = 0; i < n; i++) { holeAt.push(null); rampAt.push(false); warnAt.push(false); padAt.push(null); }
 
     // Löcher: ganze Lücke mit Rampe (springen!), Loch in der Mitte, Loch links oder rechts
-    // Richtung jedes Streckenstücks, damit Rampen nur auf geraden Teilen liegen
+    // Richtung jedes Streckenstücks: Rampen kommen nur in die Mitte eines langen geraden Stücks
     var hd = [];
     for (i = 0; i < n; i++) hd.push(Math.atan2(pts[(i + 1) % n].y - pts[i].y, pts[(i + 1) % n].x - pts[i].x));
+    function angd(q, ref) {
+      var dd = hd[((q % n) + n) % n] - ref;
+      while (dd > Math.PI) dd -= TAU;
+      while (dd < -Math.PI) dd += TAU;
+      return Math.abs(dd);
+    }
     function straight(c0, len) {
-      for (var q = c0 - 14; q <= c0 + len + 8; q++) {
-        var dd = hd[((q % n) + n) % n] - hd[c0];
-        while (dd > Math.PI) dd -= TAU;
-        while (dd < -Math.PI) dd += TAU;
-        if (Math.abs(dd) > 0.2) return false;
-      }
+      for (var q = c0 - 14; q <= c0 + len + 8; q++) if (angd(q, hd[c0]) > 0.2) return false;
       return true;
+    }
+    // Das gerade Stück um c0 (die Richtung weicht höchstens 0,12 rad ab): von a bis b
+    function straightRun(c0) {
+      var a0 = c0, b0 = c0, ref = hd[c0];
+      while (b0 - a0 < 400 && angd(a0 - 1, ref) <= 0.12) a0--;
+      while (b0 - a0 < 400 && angd(b0 + 1, ref) <= 0.12) b0++;
+      return [a0, b0];
     }
     function holeFree(c0, len) {
       for (var q = 0; q < holes.length; q++) {
@@ -3099,25 +3107,41 @@
       return c0 >= 45 && c0 + len <= n - 45;
     }
 
-    var H = 4 + Math.floor(r2() * 3);
+    var H = 4 + Math.floor(r2() * 3), mid = Math.round(W * 0.32), side = Math.round(W * 0.16);
     for (j = 0; j < H; j++) {
       var c = Math.floor(((j + 0.5) / H) * n + (r2() - 0.5) * (n / H) * 0.4), kd = r2(), hole, gl = 3 + (r2() < 0.35 ? 1 : 0), sh;
       c = Math.max(45, Math.min(n - 45, c));
       hole = null;
       if (kd < 0.4) {
-        // Lücke mit Rampe: nur auf einem geraden Stück, notfalls ein Stück weiter vorn oder hinten
-        var cs = null;
-        for (sh = 0; sh <= 40 && cs === null; sh += 2) {
-          if (holeFree(c + sh, gl) && straight(c + sh, gl)) cs = c + sh;
-          else if (sh > 0 && holeFree(c - sh, gl) && straight(c - sh, gl)) cs = c - sh;
+        // Lücke mit Rampe: genau in der Mitte eines langen geraden Stücks (mindestens 18 Stücke Gerade davor und danach)
+        for (sh = 0; sh <= 80 && !hole; sh += 2) {
+          var cands = sh ? [c + sh, c - sh] : [c];
+          for (var ci = 0; ci < cands.length && !hole; ci++) {
+            var c0 = cands[ci];
+            if (c0 < 45 || c0 > n - 45) continue;
+            // erst grob mitten in das Stück setzen, dann mit der Richtung genau dort noch zweimal nachmessen
+            var i0 = c0, run = null, it2;
+            for (it2 = 0; it2 < 4; it2++) {
+              run = straightRun(Math.round(i0 + (gl - 3) / 2));
+              var ni = Math.round((run[0] + run[1]) / 2 - (gl - 3) / 2);
+              if (ni === i0) break;
+              i0 = ni;
+            }
+            if (i0 < 45 || i0 > n - 45) continue;
+            run = straightRun(Math.round(i0 + (gl - 3) / 2));   // endgültig: Gerade von der Mitte der Rampe aus gemessen
+            var lm = i0 - 3 - run[0], rm = run[1] - (i0 + gl);
+            if (lm >= 18 && rm >= 18 && Math.abs(lm - rm) <= 3 && holeFree(i0, gl) && straight(i0, gl)) {
+              hole = { i0: i0, n: gl, l0: -W - 4, l1: W + 4, ramp: true };
+            }
+          }
         }
-        if (cs === null) kd = 0.45;   // keine gerade Stelle in der Nähe: stattdessen ein Loch ohne Rampe
-        else { c = cs; hole = { i0: c, n: gl, l0: -W - 4, l1: W + 4, ramp: true }; }
+        if (!hole) kd = 0.45;   // keine passende Gerade in der Nähe: stattdessen ein Loch ohne Rampe
+        else c = hole.i0;
       }
       if (!hole) {
-        if (kd < 0.6) hole = { i0: c, n: 4, l0: -12, l1: 12, ramp: false };
-        else if (kd < 0.8) hole = { i0: c, n: 5, l0: -W - 4, l1: 6, ramp: false };
-        else hole = { i0: c, n: 5, l0: -6, l1: W + 4, ramp: false };
+        if (kd < 0.6) hole = { i0: c, n: 4, l0: -mid, l1: mid, ramp: false };
+        else if (kd < 0.8) hole = { i0: c, n: 5, l0: -W - 4, l1: side, ramp: false };
+        else hole = { i0: c, n: 5, l0: -side, l1: W + 4, ramp: false };
         if (!holeFree(c, hole.n)) continue;
       }
       holes.push(hole);
@@ -3149,8 +3173,8 @@
       while (!clear(gi, 4) && g1 < 40) { gi += 3; g1++; }
       if (!clear(gi, 4)) continue;
       for (k = -1; k <= 1; k++) {
-        var gp = posAt(gi, k * 22);
-        boxes.push({ i: gi, l: k * 22, x: gp.x, y: gp.y });
+        var gl2 = k * Math.round(W * 0.58), gp = posAt(gi, gl2);
+        boxes.push({ i: gi, l: gl2, x: gp.x, y: gp.y });
       }
     }
 
@@ -3160,7 +3184,7 @@
       var pi = Math.floor(((j + 0.62) / 6) * n + (r2() - 0.5) * 12), p1t = 0;
       while (!clear(pi, 3) && p1t < 40) { pi += 3; p1t++; }
       if (!clear(pi, 3) || !clear(pi + 2, 3)) continue;
-      var pl = (r2() - 0.5) * 34, pc = posAt(pi + 1, pl), pad = { i: pi, l: pl, x: pc.x, y: pc.y };
+      var pl = (r2() - 0.5) * W * 0.9, pc = posAt(pi + 1, pl), pad = { i: pi, l: pl, x: pc.x, y: pc.y };
       pads.push(pad);
       padAt[pi] = pad;
       padAt[pi + 1] = pad;
@@ -3177,7 +3201,7 @@
     }
     while (urch.length < 9 && tries < 300) {
       tries++;
-      var ui = 30 + Math.floor(r2() * (n - 50)), ul = (r2() - 0.5) * 52;
+      var ui = 30 + Math.floor(r2() * (n - 50)), ul = (r2() - 0.5) * W * 1.35;
       if (!clear(ui, 2)) continue;
       var up = posAt(ui, ul);
       if (!freeSpot(up, 30)) continue;
@@ -3187,11 +3211,11 @@
     // Perlen (Reihen von fünf)
     var pearls = [];
     for (j = 0; j < 6; j++) {
-      var qi = Math.floor(((j + 0.45) / 6) * n) + Math.floor((r2() - 0.5) * 8), q1 = 0, ql = (r2() - 0.5) * 30;
+      var qi = Math.floor(((j + 0.45) / 6) * n) + Math.floor((r2() - 0.5) * 8), q1 = 0, ql = (r2() - 0.5) * W * 0.8;
       while ((!clear(qi, 3) || !clear(qi + 10, 3)) && q1 < 40) { qi += 3; q1++; }
       if (!clear(qi, 3) || !clear(qi + 10, 3)) continue;
       for (k = 0; k < 5; k++) {
-        var pl2 = ql + Math.sin(k * 1.1) * 8, pp = posAt(qi + k * 2, pl2), okp = true, q;
+        var pl2 = ql + Math.sin(k * 1.1) * W * 0.2, pp = posAt(qi + k * 2, pl2), okp = true, q;
         for (q = 0; q < urch.length; q++) if (Math.hypot(urch[q].x - pp.x, urch[q].y - pp.y) < 22) okp = false;
         if (okp) pearls.push({ i: qi + k * 2, l: pl2, x: pp.x, y: pp.y });
       }
@@ -3275,7 +3299,7 @@
     s.x += s.vx * dt;
     s.y += s.vy * dt;
     s.speed = Math.hypot(s.vx, s.vy);
-    if (s.fall <= 0) respawn(s, tr, (s.fallHole.i0 - 5 + tr.n) % tr.n);
+    if (s.fall <= 0) respawn(s, tr, (s.fallHole.i0 - 9 + tr.n) % tr.n);
   }
 
   // Liegt das Auto über einem Loch?
@@ -3350,7 +3374,7 @@
     s.onRoad = s.dist <= EDGE;
     if (s.onRoad && s.air <= 0) s.good = s.idx;
     // zu weit von der Strecke weg (Abkürzung durch die Mitte): der Tauchroboter setzt dich zurück
-    s.lost = s.dist > 150 && s.air <= 0 ? s.lost + dt : 0;
+    s.lost = s.dist > 190 && s.air <= 0 ? s.lost + dt : 0;
     if (s.lost > 1.5) {
       respawn(s, tr, ((s.good - 2) % n + n) % n);
       s.ev.push("lost");
@@ -3402,7 +3426,7 @@
     if (!s.item && s.air < 14) {
       for (k = 0; k < tr.boxes.length; k++) {
         if (s.taken[k] > s.t) continue;
-        if (Math.hypot(s.x - tr.boxes[k].x, s.y - tr.boxes[k].y) < 16) {
+        if (Math.hypot(s.x - tr.boxes[k].x, s.y - tr.boxes[k].y) < 20) {
           s.taken[k] = s.t + 7;
           s.item = pickItem(s);
           s.ev.push("item");
@@ -3414,7 +3438,7 @@
     if (s.air < 14) {
       for (k = 0; k < tr.pearls.length; k++) {
         if (s.pearlLap[k] === s.lap + 1) continue;
-        if (Math.hypot(s.x - tr.pearls[k].x, s.y - tr.pearls[k].y) < 13) {
+        if (Math.hypot(s.x - tr.pearls[k].x, s.y - tr.pearls[k].y) < 16) {
           s.pearlLap[k] = s.lap + 1;
           if (s.pearls < 10) s.pearls++;
           s.ev.push("pearl");
@@ -3424,7 +3448,7 @@
     // Boost-Felder
     if (s.air < 6) {
       for (k = 0; k < tr.pads.length; k++) {
-        if (Math.hypot(s.x - tr.pads[k].x, s.y - tr.pads[k].y) < 14) {
+        if (Math.hypot(s.x - tr.pads[k].x, s.y - tr.pads[k].y) < 20) {
           if (s.boost < 0.9) s.ev.push("pad");
           s.boost = Math.max(s.boost, 1.3);
         }
@@ -3433,7 +3457,7 @@
     // Seeigel
     if (s.inv <= 0 && s.air < 10) {
       for (k = 0; k < tr.urchins.length; k++) {
-        if (Math.hypot(s.x - tr.urchins[k].x, s.y - tr.urchins[k].y) < 11) {
+        if (Math.hypot(s.x - tr.urchins[k].x, s.y - tr.urchins[k].y) < 14) {
           s.inv = 1.5;
           if (s.shield) { s.shield = false; s.ev.push("pop"); }
           else { s.stun = 0.8; s.vx *= 0.3; s.vy *= 0.3; s.inv = 2; s.ev.push("hit"); }
@@ -4097,8 +4121,8 @@
       p = track.padAt[i];
       if (p) {
         var pulse = 0.85 + 0.25 * Math.sin(now * 8);
-        band(A, B, p.l - 9, p.l + 9, fog([40, 190, 230], d, pulse * 1.1));
-        band(A, B, p.l - 3, p.l + 3, fog([220, 255, 255], d, i % 2 ? 1.1 : 0.8));
+        band(A, B, p.l - 13, p.l + 13, fog([40, 190, 230], d, pulse * 1.1));
+        band(A, B, p.l - 4, p.l + 4, fog([220, 255, 255], d, i % 2 ? 1.1 : 0.8));
       }
       // Start und Ziel
       if (i === 0 || i === track.n - 1) {
@@ -4238,7 +4262,7 @@
         ctx.beginPath(); ctx.ellipse(gX, gY, gr, gr * 0.38, 0, 0, TAU); ctx.fill();
       }
 
-      drawMesh(MESH_CAR, sim.x, sim.y, zc, M, 0.9, dark, keys.down);
+      drawMesh(MESH_CAR, sim.x, sim.y, zc, M, 1.05, dark, keys.down);
 
       // Blasenschild
       if (sim.shield && sim.fall <= 0) {
@@ -4394,11 +4418,11 @@
             hg.addColorStop(1, "rgba(255,230,120,0)");
             ctx.fillStyle = hg;
             ctx.beginPath(); ctx.arc(X, Y, 15 * s, 0, TAU); ctx.fill();
-            drawMesh(MESH_BOX, it.o.x, it.o.y, it.wz, rotMat(now * 1.8 + it.idx, 0, 0.6), 1, 0, false);
+            drawMesh(MESH_BOX, it.o.x, it.o.y, it.wz, rotMat(now * 1.8 + it.idx, 0, 0.6), 1.1, 0, false);
           } else if (d < 190) {
-            drawMesh(MESH_URCH_HI, it.o.x, it.o.y, it.wz, rotMat(it.idx * 1.7, 0, 0), 1, 0, false);
+            drawMesh(MESH_URCH_HI, it.o.x, it.o.y, it.wz, rotMat(it.idx * 1.7, 0, 0), 1.2, 0, false);
           } else {
-            drawMesh(MESH_URCH_LO, it.o.x, it.o.y, it.wz, rotMat(0, 0, 0), 1.2, 0, false);
+            drawMesh(MESH_URCH_LO, it.o.x, it.o.y, it.wz, rotMat(0, 0, 0), 1.45, 0, false);
           }
         } else if (it.t === 5) drawFish(it.f, now);
         else if (it.t === 6) drawCar();
